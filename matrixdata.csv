@@ -51,7 +51,7 @@ HB,50,bcsstk28,Structural Problem,real,"A. Mera, R. Cigel, J. Lewis",4410,4410,2
 HB,51,bcsstk29,Structural Problem,binary,"R. Cigel, R. Grimes, J. Lewis, E. Meyer",13992,13992,619488,619488,0,1,13992,1,10006.0,0.0,3986.0,3986.0,28.0,28,100.0,100.0,0,1,51.73701,7.279799e-74,7.106929e+74
 HB,52,bcsstk30,Structural Problem,binary,"R. Cigel, R. Grimes, J. Lewis, E. Meyer",28924,28924,2043492,2043492,0,1,28924,1,8935.0,0.0,19989.0,19989.0,1.0,1,100.0,100.0,0,1,95.30248,0.0,inf
 HB,53,bcsstk31,Structural Problem,binary,"R. Cigel, R. Grimes, J. Lewis, E. Meyer",35588,35588,1181416,1181416,0,1,35588,1,16803.0,0.0,18785.0,18785.0,2.0,2,100.0,100.0,0,1,57.96906,3.987424e-234,1.453797e+235
-HB,55,bcsstk33,Structural Problem,binary,"R. Cigel, R. Grimes, J. Lewis, E. Meyer",8738,8738,591904,591904,0,1,8738,1,3979.0,0.0,4759.0,4759.0,1.0,1,100.0,100.0,0,1,75.82727,5.127207e-64,1.47892e+65
+HB,55,bcsstk33,Structural Problem,binary,"R. Cigel, R. Grimes, J. Lewis, E. Meyer",8738,8738,591904,591904,0,1,8738,1,3979.0,0.0,4759.0,4759.0,1.0,1,100.0,100.0,0,1,75.82727,5.1272069999999994e-64,1.47892e+65
 HB,56,bcsstm01,Structural Problem,integer,J. Lewis,48,48,24,48,24,1,24,0,24.0,0.0,0.0,24.0,26.0,48,100.0,100.0,0,0,200.0,0.0,inf
 HB,57,bcsstm02,Structural Problem,real,J. Lewis,66,66,66,66,0,1,66,1,66.0,1.0,0.0,0.0,66.0,66,100.0,100.0,1,1,0.1728286,0.01974694,8.75217
 HB,58,bcsstm03,Structural Problem,real,J. Lewis,112,112,72,112,40,1,72,0,72.0,0.0,0.0,40.0,74.0,112,100.0,100.0,0,0,5403.5,0.0,inf
@@ -75,7 +75,7 @@ HB,75,bcsstm25,Structural Problem,real,J. Lewis,15439,15439,15439,15439,0,1,1543
 HB,76,bcsstm26,Structural Problem,real,"A. Mera, R. Cigel, J. Lewis",1922,1922,1922,1922,0,1,1922,1,1922.0,1.0,0.0,0.0,1922.0,1922,100.0,100.0,1,1,1.512404,5.782098e-06,261566.6
 HB,77,bcsstm27,Structural Problem,real,"A. Mera, R. Cigel, J. Lewis",1224,1224,56126,56126,0,1,1224,1,1224.0,1.0,0.0,0.0,1.0,1,100.0,100.0,0,1,3927.163,5.677107e-07,6917543000.0
 HB,78,beacxc,Economic Problem,real,D. Szyld,497,506,50409,50409,0,0,449,0,449.0,0.0,0.0,48.0,10.0,66,0.0,0.0,0,0,10.61518,0.0,inf
-HB,79,beaflw,Economic Problem,real,D. Szyld,497,507,53403,53403,0,0,460,0,460.0,0.0,0.0,37.0,13.0,13,0.0,0.0,0,0,219223.2,8.653984000000001e-31,2.533205e+35
+HB,79,beaflw,Economic Problem,real,D. Szyld,497,507,53403,53403,0,0,460,0,460.0,0.0,0.0,37.0,13.0,13,0.0,0.0,0,0,219223.2,8.653984000000001e-31,2.5332049999999998e+35
 HB,80,beause,Economic Problem,real,D. Szyld,497,507,44551,44551,0,0,459,0,459.0,0.0,0.0,38.0,31.0,8,0.0,0.0,0,0,218448.3,1.294005e-30,1.688156e+35
 HB,81,blckhole,Structural Problem,binary,E. Meyer,2132,2132,14872,14872,0,1,2132,1,2132.0,1.0,0.0,0.0,12.0,12,100.0,100.0,0,1,8.231003,0.00197537,4166.815
 HB,82,bp_0,Optimization Problem Sequence,real,M. Saunders,822,822,3276,3276,0,0,822,1,822.0,1.0,0.0,0.0,822.0,2,0.9,0.1,0,0,402.5496,5.643387e-05,7133121.0
@@ -96,7 +96,7 @@ HB,96,can_229,Structural Problem,binary,L. Marro,229,229,1777,1777,0,1,229,1,200
 HB,97,can_24,Structural Problem,binary,L. Marro,24,24,160,160,0,1,24,1,24.0,1.0,0.0,0.0,1.0,1,100.0,100.0,0,1,7.335568,0.09433781,77.75851
 HB,98,can_256,Structural Problem,binary,L. Marro,256,256,2916,2916,0,1,256,1,250.0,0.0,6.0,6.0,1.0,1,100.0,100.0,0,1,16.0374,7.073837e-17,2.267144e+17
 HB,99,can_268,Structural Problem,binary,L. Marro,268,268,3082,3082,0,1,268,1,261.0,0.0,7.0,7.0,1.0,1,100.0,100.0,0,1,14.45894,2.406444e-33,6.008425e+33
-HB,102,can_61,Structural Problem,binary,L. Marro,61,61,557,557,0,1,61,1,49.0,0.0,12.0,12.0,1.0,1,100.0,100.0,0,1,10.94671,1.094024e-32,1.000592e+33
+HB,102,can_61,Structural Problem,binary,L. Marro,61,61,557,557,0,1,61,1,49.0,0.0,12.0,12.0,1.0,1,100.0,100.0,0,1,10.94671,1.094024e-32,1.0005920000000001e+33
 HB,103,can_62,Structural Problem,binary,L. Marro,62,62,218,218,0,1,62,1,62.0,1.0,0.0,0.0,1.0,1,100.0,100.0,0,1,4.15908,0.006887905,603.8237
 HB,106,can_73,Structural Problem,binary,L. Marro,73,73,377,377,0,1,73,1,73.0,1.0,0.0,0.0,1.0,1,100.0,100.0,0,1,6.327656,0.177575,35.6337
 HB,107,can_838,Structural Problem,binary,L. Marro,838,838,10010,10010,0,1,838,1,838.0,1.0,0.0,0.0,1.0,1,100.0,100.0,0,1,15.75944,0.003059816,5150.453
@@ -116,13 +116,13 @@ HB,120,dwt_2680,Structural Problem,binary,"G. Everstine, D. Taylor",2680,2680,25
 HB,121,dwt_307,Structural Problem,binary,"G. Everstine, D. Taylor",307,307,2523,2523,0,1,307,1,288.0,0.0,19.0,19.0,1.0,1,100.0,100.0,0,1,8.657998,2.377319e-18,3.641918e+18
 HB,122,dwt_310,Structural Problem,binary,"G. Everstine, D. Taylor",310,310,2448,2448,0,1,310,1,310.0,1.0,0.0,0.0,1.0,1,100.0,100.0,0,1,8.564631,0.002619878,3269.095
 HB,123,dwt_346,Structural Problem,binary,"G. Everstine, D. Taylor",346,346,3226,3226,0,1,346,1,341.0,0.0,5.0,5.0,4.0,4,100.0,100.0,0,1,12.20739,1.633166e-16,7.474677e+16
-HB,124,dwt_361,Structural Problem,binary,"G. Everstine, D. Taylor",361,361,2953,2953,0,1,361,1,358.0,0.0,3.0,3.0,1.0,1,100.0,100.0,0,1,8.807722,4.298495000000001e-17,2.049025e+17
+HB,124,dwt_361,Structural Problem,binary,"G. Everstine, D. Taylor",361,361,2953,2953,0,1,361,1,358.0,0.0,3.0,3.0,1.0,1,100.0,100.0,0,1,8.807722,4.2984950000000006e-17,2.049025e+17
 HB,125,dwt_419,Structural Problem,binary,"G. Everstine, D. Taylor",419,419,3563,3563,0,1,419,1,370.0,0.0,49.0,49.0,1.0,1,100.0,100.0,0,1,9.33913,1.7300959999999998e-19,5.39804e+19
 HB,126,dwt_492,Structural Problem,binary,"G. Everstine, D. Taylor",492,492,3156,3156,0,1,492,1,488.0,0.0,4.0,4.0,2.0,2,100.0,100.0,0,1,7.806194,3.286984e-17,2.374881e+17
 HB,127,dwt_503,Structural Problem,binary,"G. Everstine, D. Taylor",503,503,6027,6027,0,1,503,1,499.0,0.0,4.0,4.0,1.0,1,100.0,100.0,0,1,16.96933,1.263572e-16,1.342965e+17
 HB,128,dwt_512,Structural Problem,binary,"G. Everstine, D. Taylor",512,512,3502,3502,0,1,512,1,477.0,0.0,35.0,35.0,32.0,32,100.0,100.0,0,1,11.38403,0.0,inf
 HB,129,dwt_59,Structural Problem,binary,"G. Everstine, D. Taylor",59,59,267,267,0,1,59,1,59.0,1.0,0.0,0.0,1.0,1,100.0,100.0,0,1,4.966416,0.04205181,118.1023
-HB,130,dwt_592,Structural Problem,binary,"G. Everstine, D. Taylor",592,592,5104,5104,0,1,592,1,580.0,0.0,12.0,12.0,1.0,1,100.0,100.0,0,1,9.871999,9.18068e-18,1.075302e+18
+HB,130,dwt_592,Structural Problem,binary,"G. Everstine, D. Taylor",592,592,5104,5104,0,1,592,1,580.0,0.0,12.0,12.0,1.0,1,100.0,100.0,0,1,9.871999,9.180680000000001e-18,1.075302e+18
 HB,131,dwt_607,Structural Problem,binary,"G. Everstine, D. Taylor",607,607,5131,5131,0,1,607,1,547.0,0.0,60.0,60.0,4.0,4,100.0,100.0,0,1,10.05589,1.4853910000000002e-17,6.769859e+17
 HB,132,dwt_66,Structural Problem,binary,"G. Everstine, D. Taylor",66,66,320,320,0,1,66,1,66.0,1.0,0.0,0.0,1.0,1,100.0,100.0,0,1,5.003238,0.03347632,149.456
 HB,133,dwt_72,Structural Problem,binary,"G. Everstine, D. Taylor",72,72,222,222,0,1,72,1,70.0,0.0,2.0,2.0,1.0,1,100.0,100.0,0,1,3.492317,1.607805e-16,2.172102e+16
@@ -206,7 +206,7 @@ HB,224,orani678,Economic Problem,real,K. Pearson,2529,2529,90158,90158,0,0,2529,
 HB,225,orsirr_1,Computational Fluid Dynamics Problem,real,R. Grimes,1030,1030,6858,6858,0,0,1030,1,1030.0,1.0,0.0,0.0,1.0,1,100.0,40.9,0,0,458081.0,5.938091,77142.81
 HB,226,orsirr_2,Computational Fluid Dynamics Problem,real,R. Grimes,886,886,5970,5970,0,0,886,1,886.0,1.0,0.0,0.0,1.0,1,100.0,41.2,0,0,458081.0,7.240441,63267.0
 HB,227,orsreg_1,Computational Fluid Dynamics Problem,real,R. Grimes,2205,2205,14133,14133,0,0,2205,1,2205.0,1.0,0.0,0.0,1.0,1,100.0,41.2,0,0,29272.46,4.339703,6745.269
-HB,228,plat1919,2D/3D Problem,real,J. Lewis,1919,1919,32399,32399,0,1,1919,1,1916.0,0.0,3.0,3.0,1.0,1,100.0,100.0,1,1,2.921637,5.446183000000001e-17,5.364559e+16
+HB,228,plat1919,2D/3D Problem,real,J. Lewis,1919,1919,32399,32399,0,1,1919,1,1916.0,0.0,3.0,3.0,1.0,1,100.0,100.0,1,1,2.921637,5.4461830000000005e-17,5.364559e+16
 HB,229,plat362,2D/3D Problem,real,J. Lewis,362,362,5786,5786,0,1,362,1,362.0,1.0,0.0,0.0,1.0,1,100.0,100.0,1,1,0.7742794,3.554638e-12,217822000000.0
 HB,230,plsk1919,2D/3D Problem,real,J. Lewis,1919,1919,9662,9662,0,0,1919,1,1918.0,0.0,1.0,1.0,11.0,1,100.0,0.0,0,0,1.70928,8.471168e-17,2.017762e+16
 HB,231,plskz362,2D/3D Problem,real,J. Lewis,362,362,1760,1760,0,0,362,1,362.0,1.0,0.0,0.0,3.0,1,100.0,0.0,0,0,0.8799315,1.885373e-06,466714.7
@@ -380,7 +380,7 @@ LPnetlib,639,lp_ken_13,Linear Programming Problem,integer,J. Kennington,28632,42
 LPnetlib,641,lp_lotfi,Linear Programming Problem,real,V. Lofti,153,366,1136,1136,0,0,153,1,153.0,1.0,0.0,0.0,9.0,1,0.0,0.0,0,0,1275.023,0.001920182,664011.6
 LPnetlib,642,lp_maros,Linear Programming Problem,real,I. Maros,846,1966,10137,10137,0,0,846,1,846.0,1.0,0.0,0.0,3.0,3,0.0,0.0,0,0,58270.75,0.02995887,1945025.0
 LPnetlib,643,lp_maros_r7,Linear Programming Problem,real,I. Maros,3136,9408,144848,144848,0,0,3136,1,3136.0,1.0,0.0,0.0,1.0,1,0.0,0.0,0,0,3.403268,1.464952,2.323126
-LPnetlib,644,lp_modszk1,Linear Programming Problem,real,I. Maros,687,1620,3168,3168,0,0,686,0,686.0,0.0,0.0,1.0,3.0,3,0.0,0.0,0,0,4.87556,9.119891e-20,5.346073e+19
+LPnetlib,644,lp_modszk1,Linear Programming Problem,real,I. Maros,687,1620,3168,3168,0,0,686,0,686.0,0.0,0.0,1.0,3.0,3,0.0,0.0,0,0,4.87556,9.119890999999999e-20,5.346073e+19
 LPnetlib,645,lp_osa_07,Linear Programming Problem,real,J. Kennington,1118,25067,144812,144812,0,0,1118,1,1118.0,1.0,0.0,0.0,1.0,1,0.0,0.0,0,0,680.3249,1.0,680.3249
 LPnetlib,646,lp_osa_14,Linear Programming Problem,real,J. Kennington,2337,54797,317097,317097,0,0,2337,1,2337.0,1.0,0.0,0.0,1.0,1,0.0,0.0,0,0,994.481,1.0,994.481
 LPnetlib,647,lp_osa_30,Linear Programming Problem,real,J. Kennington,4350,104374,604488,604488,0,0,4350,1,4350.0,1.0,0.0,0.0,1.0,1,0.0,0.0,0,0,1365.894,1.0,1365.894
@@ -447,14 +447,14 @@ LPnetlib,707,lpi_box1,Linear Programming Problem,integer,Z. You,231,261,651,651,
 LPnetlib,708,lpi_ceria3d,Linear Programming Problem,integer,E. Klotz,3576,4400,21178,21178,0,0,3576,1,3576.0,1.0,0.0,0.0,1.0,1,0.0,0.0,0,0,47.73186,1.0,47.73186
 LPnetlib,709,lpi_chemcom,Linear Programming Problem,real,T. Baker,288,744,1590,1590,0,0,288,1,288.0,1.0,0.0,0.0,1.0,1,0.0,0.0,0,0,3.767914,0.5447306,6.917022
 LPnetlib,710,lpi_cplex1,Linear Programming Problem,real,E. Klotz,3005,5224,10947,10947,0,0,3005,1,3005.0,1.0,0.0,0.0,1.0,1,0.0,0.0,0,0,200.0065,0.06386641,3131.639
-LPnetlib,711,lpi_cplex2,Linear Programming Problem,real,E. Klotz,224,378,1215,1215,0,0,224,1,223.0,0.0,1.0,1.0,1.0,1,0.0,0.0,0,0,15.55518,7.696416e-17,2.021094e+17
+LPnetlib,711,lpi_cplex2,Linear Programming Problem,real,E. Klotz,224,378,1215,1215,0,0,224,1,223.0,0.0,1.0,1.0,1.0,1,0.0,0.0,0,0,15.55518,7.696416000000001e-17,2.021094e+17
 LPnetlib,712,lpi_ex72a,Linear Programming Problem,integer,Z. You,197,215,467,467,0,0,197,1,192.0,0.0,5.0,5.0,1.0,1,0.0,0.0,0,0,2.928751,3.751962e-16,7805918000000000.0
 LPnetlib,713,lpi_ex73a,Linear Programming Problem,integer,Z. You,193,211,457,457,0,0,193,1,188.0,0.0,5.0,5.0,1.0,1,0.0,0.0,0,0,2.928749,6.144511000000001e-17,4.766448e+16
 LPnetlib,714,lpi_forest6,Linear Programming Problem,real,H. Greenberg,66,131,246,246,0,0,66,1,66.0,1.0,0.0,0.0,1.0,1,0.0,0.0,0,0,2.671478,0.8670271,3.081193
 LPnetlib,715,lpi_galenet,Linear Programming Problem,integer,H. Greenberg,8,14,22,22,0,0,8,1,8.0,1.0,0.0,0.0,1.0,1,0.0,0.0,0,0,2.427984,0.8411887,2.886373
 LPnetlib,716,lpi_gosh,Linear Programming Problem,real,R. Main,3792,13455,99953,99953,0,0,3790,0,3790.0,0.0,0.0,2.0,130.0,105,0.0,0.0,0,0,323.672,6.285286e-16,5.149678e+17
 LPnetlib,717,lpi_gran,Linear Programming Problem,real,R. Main,2658,2525,20111,20111,0,0,2311,0,1938.0,0.0,373.0,587.0,1267.0,1243,0.0,0.0,0,0,2079.021,1.7911930000000002e-17,1.16069e+20
-LPnetlib,718,lpi_greenbea,Linear Programming Problem,real,R. Fourer,2393,5596,31074,31074,0,0,2390,0,2390.0,0.0,0.0,3.0,75.0,9,0.0,0.0,0,0,106.2251,4.062603e-64,2.6147049999999998e+65
+LPnetlib,718,lpi_greenbea,Linear Programming Problem,real,R. Fourer,2393,5596,31074,31074,0,0,2390,0,2390.0,0.0,0.0,3.0,75.0,9,0.0,0.0,0,0,106.2251,4.0626029999999996e-64,2.6147049999999998e+65
 LPnetlib,719,lpi_itest2,Linear Programming Problem,real,"J. Chinneck, E. Dravnieks",9,13,26,26,0,0,9,1,9.0,1.0,0.0,0.0,1.0,1,0.0,0.0,0,0,4.226048,1.0,4.226048
 LPnetlib,720,lpi_itest6,Linear Programming Problem,real,"J. Chinneck, E. Dravnieks",11,17,29,29,0,0,11,1,11.0,1.0,0.0,0.0,1.0,3,0.0,0.0,0,0,3.352685,0.02231112,150.2696
 LPnetlib,721,lpi_klein1,Linear Programming Problem,integer,E. Klotz,54,108,750,750,0,0,54,1,54.0,1.0,0.0,0.0,1.0,1,0.0,0.0,0,0,5478.892,1.0,5478.892
@@ -482,7 +482,7 @@ GHS_indef,1247,stokes64,Computational Fluid Dynamics Problem,real,M. Arioli,1254
 GHS_indef,1248,stokes64s,Computational Fluid Dynamics Problem,real,M. Arioli,12546,12546,140034,140034,0,1,12546,1,12544.0,0.0,2.0,2.0,1.0,1,100.0,100.0,0,0,53.96631,1.400248e-15,3.854054e+16
 GHS_indef,1249,tuma1,2D/3D Problem,real,M. Tuma,22967,22967,87760,87760,0,1,22967,1,22967.0,1.0,0.0,0.0,1437.0,1,100.0,100.0,0,0,4.891341,0.001595498,3065.714
 GHS_indef,1250,tuma2,2D/3D Problem,real,M. Tuma,12992,12992,49365,49365,0,1,12992,1,12992.0,1.0,0.0,0.0,1101.0,1,100.0,100.0,0,0,4.891338,0.002875117,1701.266
-GHS_indef,1295,bloweya,Materials Problem,real,J. Blowey,30004,30004,150009,150009,0,1,30004,1,20050.0,0.0,9954.0,9954.0,1.0,1,100.0,100.0,0,0,100.0976,9.02584e-20,1.109012e+21
+GHS_indef,1295,bloweya,Materials Problem,real,J. Blowey,30004,30004,150009,150009,0,1,30004,1,20050.0,0.0,9954.0,9954.0,1.0,1,100.0,100.0,0,0,100.0976,9.025839999999999e-20,1.109012e+21
 GHS_indef,1298,brainpc2,Optimization Problem,real,N. Duatrebande,27607,27607,179395,179395,0,1,27607,1,27607.0,1.0,0.0,0.0,2.0,2,100.0,100.0,0,0,4464.852,0.1,44648.52
 GHS_indef,1299,bratu3d,2D/3D Problem,real,J. More',27792,27792,173796,173796,0,1,27792,1,27792.0,1.0,0.0,0.0,3460.0,285,100.0,100.0,0,0,11.93723,0.02017826,591.5886
 GHS_indef,1303,linverse,Statistical/Mathematical Problem,real,P. Toint,11999,11999,95977,95977,0,1,11999,1,11999.0,1.0,0.0,0.0,1.0,1,100.0,100.0,0,1,15.51683,0.003931686,3946.608
@@ -512,7 +512,7 @@ Pajek,1460,divorce,Bipartite Graph,binary,V. Batagelj,50,9,225,225,0,0,9,1,9.0,1
 GHS_indef,1237,helm3d01,2D/3D Problem,real,"N. Gould, Y. Hu, J. Scott",32226,32226,428444,428444,0,1,32226,1,32226.0,1.0,0.0,0.0,1.0,1,100.0,100.0,0,0,0.5052177,2.060517e-06,245189.7
 GHS_indef,1239,laser,Materials Problem,real,"N. Gould, Y. Hu, J. Scott",3002,3002,9000,9000,0,1,3000,0,3000.0,0.0,0.0,2.0,1002.0,1,100.0,100.0,0,0,4.24914,3.0720980000000005e-17,1.38314e+17
 GHS_indef,1240,mario001,2D/3D Problem,real,"N. Gould, Y. Hu, J. Scott",38434,38434,204912,206156,1244,1,38434,1,38434.0,1.0,0.0,0.0,312.0,312,100.0,100.0,0,0,2.607803,0.000139406,18706.53
-GHS_indef,1245,sit100,2D/3D Problem,real,"N. Gould, Y. Hu, J. Scott",10262,10262,61046,61046,0,1,10262,1,10261.0,0.0,1.0,1.0,1.0,1,100.0,100.0,0,0,3.242868,4.511949000000001e-17,7.187289e+16
+GHS_indef,1245,sit100,2D/3D Problem,real,"N. Gould, Y. Hu, J. Scott",10262,10262,61046,61046,0,1,10262,1,10261.0,0.0,1.0,1.0,1.0,1,100.0,100.0,0,0,3.242868,4.5119490000000006e-17,7.187289e+16
 SNAP,2288,wiki-Vote,Directed Graph,binary,"J. Leskovec, D. Huttenlocher, J. Kleinberg",8297,8297,103689,103689,0,0,2379,0,2379.0,0.0,0.0,5918.0,,6998,5.6,5.6,0,0,103.1876,0.0,inf
 SNAP,2290,email-Enron,Directed Graph,binary,"L. Kaelbling, M. Gervasio, W. Cohen",36692,36692,367662,367662,0,1,25119,0,24939.0,0.0,180.0,11753.0,,1065,100.0,100.0,0,0,118.4177,1.255839e-285,9.42937e+286
 SNAP,2292,cit-HepPh,Directed Graph,binary,"J. Gehrke, P. Ginsparg, J. Kleinberg",34546,34546,421578,421578,0,0,26516,0,26377.0,0.0,139.0,8169.0,,21608,0.3,0.3,0,0,57.07717,0.0,inf
@@ -578,7 +578,7 @@ Pajek,1508,Lederberg,Directed Multigraph,integer,E. Garfield,8843,8843,41601,416
 Pajek,1512,ODLIS,Directed Multigraph,integer,J. Reitz,2909,2909,18246,18246,0,0,1961,0,1959.0,0.0,2.0,950.0,,1028,20.4,20.0,0,0,36.32874,0.0,inf
 Pajek,1515,Ragusa16,Directed Weighted Graph,integer,V. Batagelj,24,24,81,81,0,0,18,0,18.0,0.0,0.0,6.0,,10,36.6,19.7,0,0,10.71951,0.0,inf
 Pajek,1516,Ragusa18,Directed Weighted Graph,integer,V. Batagelj,23,23,64,64,0,0,15,0,15.0,0.0,0.0,8.0,,8,32.8,19.7,0,0,6.984938,3.494029e-35,1.999107e+35
-Pajek,1517,Reuters911,Undirected Weighted Graph Sequence,integer,"S. Corman, T. Kuhn, R. Mcphee, K. Dooley",13332,13332,296076,296076,0,1,10685,0,10682.0,0.0,3.0,2650.0,,22,100.0,100.0,0,0,1904.122,1.372014e-32,1.387829e+35
+Pajek,1517,Reuters911,Undirected Weighted Graph Sequence,integer,"S. Corman, T. Kuhn, R. Mcphee, K. Dooley",13332,13332,296076,296076,0,1,10685,0,10682.0,0.0,3.0,2650.0,,22,100.0,100.0,0,0,1904.122,1.372014e-32,1.3878289999999999e+35
 Pajek,1518,Roget,Directed Graph,binary,D. Knuth,1022,1022,5075,5075,0,0,986,0,984.0,0.0,2.0,38.0,,77,56.2,56.2,0,0,9.006808,0.0,inf
 Pajek,1519,Sandi_authors,Undirected Weighted Graph,integer,I. Klavzar,86,86,248,248,0,1,72,0,72.0,0.0,0.0,14.0,,1,100.0,100.0,0,0,12.10114,6.776464e-18,1.78576e+18
 Pajek,1521,SciMet,Directed Multigraph,integer,E. Garfield,3084,3084,10413,10413,0,0,1573,0,1569.0,0.0,4.0,1515.0,,3072,0.2,0.2,0,0,15.63579,0.0,inf
@@ -597,6 +597,7 @@ SNAP,2785,email-Eu-core-temporal,Directed Temporal Multigraph,integer,"A. Paranj
 SNAP,2790,soc-sign-bitcoin-alpha,Directed Weighted Temporal Graph,integer,"S. Kumar, F. Spezzano, V.S. Subrahmanian, C. Faloutsos",3783,3783,24186,24186,0,0,1984,0,1983.0,0.0,1.0,1800.0,,540,83.2,59.6,0,0,126.09762511613644,,
 SNAP,2791,soc-sign-bitcoin-otc,Directed Weighted Temporal Graph,integer,"S. Kumar, F. Spezzano, V.S. Subrahmanian, C. Faloutsos",5881,5881,35592,35592,0,0,2794,0,2786.0,0.0,8.0,3095.0,,1144,79.2,56.9,0,0,205.82165000637093,,
 SNAP,2797,wiki-RfA,Directed Weighted Temporal Multigraph,integer,"R. West, H. S. Paskov, J. Leskovec, C. Potts",11380,11380,188077,188077,0,0,3474,0,3474.0,0.0,0.0,7906.0,,8931,7.5,6.5,0,0,137.4724536899692,,
+SNAP,2793,sx-mathoverflow,Directed Temporal Multigraph,integer,"A. Paranjape, A. R. Benson, and J. Leskovec",24818,24818,239978,239978,0,0,15188,0,15177.0,0.0,11.0,9641.0,,11626,35.1,16.1,0,0,2011.886168796461,,
 FlowIPM22,2894,Spielman_k100,Undirected Weighted Graph,real,"Y. Gao, R. Kyng, D. Spielman",338402,338402,1025404,1025404,0,1,338402,1,,,,,1.0,1,100.0,100.0,1,1,8.051378497078234,,
 FlowIPM22,2900,uni_chimera_i1,Undirected Weighted Graph,real,"Y. Gao, R. Kyng, D. Spielman",100000,100000,1100592,1100592,0,1,100000,1,,,,,1.0,1,100.0,100.0,1,1,14.743530893093382,,
 FlowIPM22,2901,uni_chimera_i2,Undirected Weighted Graph,real,"Y. Gao, R. Kyng, D. Spielman",100000,100000,797974,797974,0,1,100000,1,,,,,1.0,1,100.0,100.0,1,1,12.686321096893115,,
@@ -668,7 +669,6 @@ GHS_indef,1238,k1_san,2D/3D Problem,real,"N. Gould, Y. Hu, J. Scott",67759,67759
 GHS_indef,1241,mario002,Duplicate 2D/3D Problem,real,"N. Gould, Y. Hu, J. Scott",389874,389874,2097566,2101242,3676,1,389874,1,,,,,920.0,920,100.0,100.0,0,0,2.6279225488878497,,
 GHS_indef,1244,olesnik0,2D/3D Problem,real,"N. Gould, Y. Hu, J. Scott",88263,88263,744216,744216,0,1,88263,1,,,,,3.0,1,100.0,100.0,0,0,919.4450546461048,,
 GHS_indef,1251,turon_m,2D/3D Problem,real,"N. Gould, Y. Hu, J. Scott",189924,189924,1690876,1690876,0,1,189924,1,,,,,5.0,1,100.0,100.0,0,0,83.05509547838734,,
-SNAP,2793,sx-mathoverflow,Directed Temporal Multigraph,integer,"A. Paranjape, A. R. Benson, and J. Leskovec",24818,24818,239978,239978,0,0,15188,0,,,,,,11626,35.1,16.1,0,0,2011.886168796461,,
 LAW,2441,cnr-2000,Directed Graph,binary,"Laboratory for Web Algorithmics (LAW), Universita degli Studi di Milano, http://law.di.unimi.it/index.php",325557,325557,3216152,3216152,0,0,192295,0,,,,,,100977,24.9,24.9,0,0,716.2979059232113,,
 LAW,2444,enron,Directed Graph,binary,"Laboratory for Web Algorithmics (LAW), Universita degli Studi di Milano, http://law.di.unimi.it/index.php",69244,69244,276143,276143,0,0,8049,0,,,,,,60916,14.7,14.7,0,0,99.86404866,,
 LAW,2445,amazon-2008,Directed Graph,binary,"Laboratory for Web Algorithmics (LAW), Universita degli Studi di Milano, http://law.di.unimi.it/index.php",735323,735323,5158388,5158388,0,0,641379,0,,,,,,90660,63.4,63.4,0,0,35.75267321773995,,
