@@ -11,7 +11,7 @@ import shap
 import scipy.sparse as sp
 import scipy.sparse.csgraph as csgraph
 import scipy.sparse.linalg as splinalg
-from sklearn.preprocessing import StandardScaler, minmax_scale, QuantileTransformer, MinMaxScaler
+from sklearn.preprocessing import StandardScaler, minmax_scale, QuantileTransformer, MinMaxScaler, LabelEncoder
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.model_selection import cross_val_score, KFold, GridSearchCV
@@ -1404,7 +1404,7 @@ routingTargets = {
 }
 
 # ---------------------------------------------------------
-# TRAIN GATE THRESHOLDS
+# TRAIN GATE THRESHOLDS (FULL MODEL CAPTURE)
 # ---------------------------------------------------------
 learnedThresholds = {}
 accuracyMetrics = []
@@ -1428,91 +1428,87 @@ for targetName, configDetails in routingTargets.items():
     yTree = (treeData[targetName] > 0).astype(int)
     
     if len(np.unique(yTree)) > 1:
-        stumpModel = DecisionTreeClassifier(max_depth=1, class_weight='balanced', random_state=42)
+        # Depth 3 allows up to 3 cascading variable checks per decision
+        stumpModel = DecisionTreeClassifier(max_depth=3, min_samples_leaf=5, class_weight='balanced', random_state=42)
         stumpModel.fit(xTree, yTree)
         yPred = stumpModel.predict(xTree)
+        
+        leafConfidences = stumpModel.predict_proba(xTree)
+        positiveConfidence = np.mean(leafConfidences[yPred == 1, 1]) * 100 if sum(yPred == 1) > 0 else 0.0
         
         precisionVal = precision_score(yTree, yPred, zero_division=0)
         recallVal = recall_score(yTree, yPred, zero_division=0)
         f1Val = f1_score(yTree, yPred, zero_division=0)
         
-        topFeatureIndex = stumpModel.tree_.feature[0]
-        if topFeatureIndex != -2:
-            topFeatureName = allowedFeatures[topFeatureIndex]
-            thresholdValue = stumpModel.tree_.threshold[0]
+        # Store the trained model and feature list for the Agentic Router to use
+        learnedThresholds[targetName] = {
+            'model': stumpModel,
+            'features': allowedFeatures,
+            'action': configDetails['action'],
+            'invertLogic': configDetails.get('invertLogic', False),
             
-            leftValueArray = stumpModel.tree_.value[1][0]
-            rightValueArray = stumpModel.tree_.value[2][0]
-            
-            classIndices = np.where(stumpModel.classes_ == 1)[0]
-            if len(classIndices) > 0:
-                idx1 = classIndices[0]
-                leftRisk = leftValueArray[idx1] / np.sum(leftValueArray)
-                rightRisk = rightValueArray[idx1] / np.sum(rightValueArray)
-            else:
-                leftRisk = 0.0
-                rightRisk = 0.0
-                
-            isGreaterThan = rightRisk > leftRisk
-            learnedThresholds[targetName] = {
-                'feature': topFeatureName,
-                'threshold': thresholdValue,
-                'isGreaterThan': isGreaterThan,
-                'action': configDetails['action'],
-                'invertLogic': configDetails.get('invertLogic', False)
-            }
-            accuracyMetrics.append({
-                'Target Constraint': targetName,
-                'Gating Feature': topFeatureName,
-                'Precision': precisionVal,
-                'Recall': recallVal,
-                'F1 Score': f1Val
-            })
+            # Save the root node purely for the Matplotlib visualization boxes
+            'rootFeature': allowedFeatures[stumpModel.tree_.feature[0]] if stumpModel.tree_.feature[0] != -2 else "Unknown",
+            'rootThreshold': stumpModel.tree_.threshold[0] if stumpModel.tree_.feature[0] != -2 else 0,
+            'meanConfidence': positiveConfidence
+        }
+        
+        accuracyMetrics.append({
+            'Target Constraint': targetName,
+            'Gating Feature': learnedThresholds[targetName]['rootFeature'],
+            'Precision': precisionVal,
+            'Recall': recallVal,
+            'F1 Score': f1Val
+        })
 
-# ----------------------
-# EXECUTE AGENTIC ROUTER
-# ----------------------
+# ---------------------------------------------------------
+# EXECUTE AGENTIC ROUTER (MULTI-VARIABLE + CONFIDENCE GATES)
+# ---------------------------------------------------------
+def evaluate_deep_rule(row, targetKey):
+    """Passes the matrix through the full trained decision tree."""
+    rule = learnedThresholds.get(targetKey)
+    if not rule: return False, 0.0
+    
+    # Extract the exact features the model requires
+    x_val = []
+    for col in rule['features']:
+        val = pd.to_numeric(row.get(col, np.nan), errors='coerce')
+        if pd.isna(val) or np.isinf(val): val = -1
+        x_val.append(np.clip(val, a_min=-1e35, a_max=1e35))
+        
+    x_arr = np.array(x_val).reshape(1, -1)
+    pred = rule['model'].predict(x_arr)[0]
+    
+    # Extract the mathematical confidence of the leaf node
+    prob = rule['model'].predict_proba(x_arr)[0][1] if len(rule['model'].classes_) > 1 else 0.0
+    
+    if rule['invertLogic']:
+        return pred == 0, 1.0 - prob if pred == 0 else prob
+    return pred == 1, prob
+
 def agenticSolverRouter(row):
-    # Stage 1: Algebraic Bipartite Scan
-    ruleSvd = learnedThresholds.get('isSvdFailed')
-    if ruleSvd:
-        val = row.get(ruleSvd['feature'], -1)
-        if (ruleSvd['isGreaterThan'] and val > ruleSvd['threshold']) or (not ruleSvd['isGreaterThan'] and val <= ruleSvd['threshold']):
-            return ruleSvd['action'], 1
-            
-    ruleRank = learnedThresholds.get('Rank Collapse')
-    if ruleRank:
-        val = row.get(ruleRank['feature'], -1)
-        if (ruleRank['isGreaterThan'] and val > ruleRank['threshold']) or (not ruleRank['isGreaterThan'] and val <= ruleRank['threshold']):
-            return ruleRank['action'], 1
-            
-    ruleChol = learnedThresholds.get('isNonCholesky')
-    if ruleChol:
-        val = row.get(ruleChol['feature'], -1)
-        hitRisk = (ruleChol['isGreaterThan'] and val > ruleChol['threshold']) or (not ruleChol['isGreaterThan'] and val <= ruleChol['threshold'])
-        if not hitRisk:
-            return ruleChol['action'], 1
-            
-    # Stage 2: Topological Graph Traversal
-    ruleIrred = learnedThresholds.get('isIrreducible')
-    if ruleIrred:
-        val = row.get(ruleIrred['feature'], -1)
-        if (ruleIrred['isGreaterThan'] and val > ruleIrred['threshold']) or (not ruleIrred['isGreaterThan'] and val <= ruleIrred['threshold']):
-            return ruleIrred['action'], 2
-            
-    ruleDecomp = learnedThresholds.get('isDecomposable')
-    if ruleDecomp:
-        val = row.get(ruleDecomp['feature'], -1)
-        if (ruleDecomp['isGreaterThan'] and val > ruleDecomp['threshold']) or (not ruleDecomp['isGreaterThan'] and val <= ruleDecomp['threshold']):
-            return ruleDecomp['action'], 2
-            
-    ruleDegen = learnedThresholds.get('isDegenerate')
-    if ruleDegen:
-        val = row.get(ruleDegen['feature'], -1)
-        if (ruleDegen['isGreaterThan'] and val > ruleDegen['threshold']) or (not ruleDegen['isGreaterThan'] and val <= ruleDegen['threshold']):
-            return ruleDegen['action'], 2
-            
-    # Stage 3: Default / Spectral Fallback
+ 
+    # STAGE 1: ALGEBRAIC BIPARTITE SCAN
+    predSvd, confSvd = evaluate_deep_rule(row, 'isSvdFailed')
+    if predSvd and confSvd >= 0.70: return learnedThresholds['isSvdFailed']['action'], 1
+    
+    predRank, confRank = evaluate_deep_rule(row, 'Rank Collapse')
+    if predRank and confRank >= 0.70: return learnedThresholds['Rank Collapse']['action'], 1
+    
+    predChol, confChol = evaluate_deep_rule(row, 'isNonCholesky')
+    if predChol and confChol >= 0.70: return learnedThresholds['isNonCholesky']['action'], 1
+    
+    # STAGE 2: TOPOLOGICAL GRAPH TRAVERSAL
+    predIrred, confIrred = evaluate_deep_rule(row, 'isIrreducible')
+    if predIrred and confIrred >= 0.70: return learnedThresholds['isIrreducible']['action'], 2
+    
+    predDecomp, confDecomp = evaluate_deep_rule(row, 'isDecomposable')
+    if predDecomp and confDecomp >= 0.70: return learnedThresholds['isDecomposable']['action'], 2
+    
+    predDegen, confDegen = evaluate_deep_rule(row, 'isDegenerate')
+    if predDegen and confDegen >= 0.70: return learnedThresholds['isDegenerate']['action'], 2
+    
+    # STAGE 3: SPECTRAL FALLBACK (Iterative Interior Point)
     return 'Route to Primal-Dual Interior Point Method (IPM)', 3
 
 evalData[['assignedSolver', 'computationStageRequired']] = evalData.apply(
@@ -1579,64 +1575,115 @@ if not dfAccuracy.empty:
 # ----------------------------
 # Agentic Routing Flow Diagram
 # ----------------------------
+
 axFlow = figPerf.add_subplot(gsPerf[0, 1])
-axFlow.set_axis_off()
-axFlow.set_title("Agentic Solver Decision Tree (Progressive Sub-Gates)", fontsize=16, fontweight='bold')
 
-def getGateText(targetKey, fallbackName, invert=False):
-    rule = learnedThresholds.get(targetKey)
-    if rule:
-        isGreater = rule['isGreaterThan']
-        if invert: isGreater = not isGreater
-        op = ">" if isGreater else "<="
-        feat = rule['feature'].replace(' ', '\n')
-        return f"IF {feat}\n{op} {rule['threshold']:.2f}"
-    return f"IF {fallbackName}\nTriggered"
+def wrapTextEveryTwoWords(textData):
+    """Parses a string and inserts a line break after every two words."""
+    if pd.isna(textData): return "Unknown"
+    cleanText = str(textData).replace('\n', ' ')
+    wordList = cleanText.split()
+    if not wordList: return ""
+    
+    formattedLines = []
+    for i in range(0, len(wordList), 2):
+        wordPair = " ".join(wordList[i:i+2])
+        formattedLines.append(wordPair)
+        
+    return "\n".join(formattedLines)
 
-stageProps = dict(boxstyle="square,pad=0.6", fc="lightgrey", ec="black", lw=2)
-gateProps = dict(boxstyle="round,pad=0.5", fc="lightyellow", ec="darkorange", lw=2)
-solvProps = dict(boxstyle="round,pad=0.5", fc="lightgreen", ec="darkgreen", lw=2)
-arrowProps = dict(facecolor='black', shrink=0.05, width=2, headwidth=8)
-passProps = dict(facecolor='gray', shrink=0.05, width=2, headwidth=8, alpha=0.5)
+allRoutingFeatures = list(set(stage1Features + stage2Features + stage3Features + ['isSquare']))
+xSurrogate = evalData[allRoutingFeatures].copy()
 
-axFlow.text(0.15, 0.95, "STAGE 1 COMPUTE\nO(NNZ) Algebraic", ha="center", va="center", bbox=stageProps, fontsize=12, fontweight='bold')
-axFlow.text(0.15, 0.75, getGateText('isSvdFailed', 'SVD Risk'), ha="center", va="center", bbox=gateProps, fontsize=10, fontweight='bold')
-axFlow.text(0.15, 0.55, getGateText('Rank Collapse', 'Rank Risk'), ha="center", va="center", bbox=gateProps, fontsize=10, fontweight='bold')
-axFlow.text(0.15, 0.35, getGateText('isNonCholesky', 'Symmetry', invert=True), ha="center", va="center", bbox=gateProps, fontsize=10, fontweight='bold')
+# Force 'isSquare' to an integer so Scikit-Learn mathematically recognizes the split
+if 'isSquare' in xSurrogate.columns:
+    xSurrogate['isSquare'] = xSurrogate['isSquare'].astype(int)
 
-axFlow.text(0.40, 0.75, "Arbitrary Precision\n/ Reject", ha="center", va="center", bbox=solvProps, fontsize=11, fontweight='bold')
-axFlow.text(0.40, 0.55, "Iterative Projection\n(GMRES)", ha="center", va="center", bbox=solvProps, fontsize=11, fontweight='bold')
-axFlow.text(0.40, 0.35, "Fast Cholesky\nFactorization", ha="center", va="center", bbox=solvProps, fontsize=11, fontweight='bold')
+for colName in allRoutingFeatures:
+    safeCol = pd.to_numeric(xSurrogate[colName], errors='coerce').replace([np.inf, -np.inf], np.nan).fillna(-1)
+    xSurrogate[colName] = np.clip(safeCol, a_min=-1e35, a_max=1e35)
 
-axFlow.text(0.65, 0.95, "STAGE 2 COMPUTE\nO(N+NNZ) Traversal", ha="center", va="center", bbox=stageProps, fontsize=12, fontweight='bold')
-axFlow.text(0.65, 0.75, getGateText('isIrreducible', 'Irreducible'), ha="center", va="center", bbox=gateProps, fontsize=10, fontweight='bold')
-axFlow.text(0.65, 0.55, getGateText('isDecomposable', 'Decomposable'), ha="center", va="center", bbox=gateProps, fontsize=10, fontweight='bold')
-axFlow.text(0.65, 0.35, getGateText('isDegenerate', 'Degenerate'), ha="center", va="center", bbox=gateProps, fontsize=10, fontweight='bold')
+ySurrogate = evalData['assignedSolver'].astype(str)
+labelEnc = LabelEncoder()
+yEncoded = labelEnc.fit_transform(ySurrogate)
 
-axFlow.text(0.90, 0.75, "Centralized Direct\n(MUMPS LU)", ha="center", va="center", bbox=solvProps, fontsize=11, fontweight='bold')
-axFlow.text(0.90, 0.55, "Parallel Distributed\n(Dantzig-Wolfe)", ha="center", va="center", bbox=solvProps, fontsize=11, fontweight='bold')
-axFlow.text(0.90, 0.35, "Exterior Point\n/ Dual Simplex", ha="center", va="center", bbox=solvProps, fontsize=11, fontweight='bold')
+surrogateModel = DecisionTreeClassifier(max_depth=4, min_samples_leaf=5, class_weight='balanced', random_state=42)
+surrogateModel.fit(xSurrogate, yEncoded)
 
-axFlow.text(0.65, 0.15, "STAGE 3 COMPUTE\nIterative Fallback", ha="center", va="center", bbox=stageProps, fontsize=12, fontweight='bold')
-axFlow.text(0.90, 0.15, "Primal-Dual\nInterior Point", ha="center", va="center", bbox=solvProps, fontsize=11, fontweight='bold')
+# Draw the base tree (We will immediately overwrite its text and styling)
+annotations = plot_tree(surrogateModel, 
+                        feature_names=allRoutingFeatures,  
+                        class_names=labelEnc.classes_,
+                        filled=True, 
+                        rounded=True, 
+                        impurity=False, 
+                        proportion=False, 
+                        fontsize=10, 
+                        ax=axFlow)
 
-for yNode in [0.75, 0.55, 0.35]:
-    axFlow.annotate("", xy=(0.28, yNode), xytext=(0.22, yNode), arrowprops=arrowProps)
-    axFlow.annotate("", xy=(0.78, yNode), xytext=(0.72, yNode), arrowprops=arrowProps)
+# ---------------------------------------------------------
+# POST-PROCESSING: Dynamic Formatting & Safe Text Hijacking
+# ---------------------------------------------------------
+costMap = {f: 1 for f in stage1Features}
+costMap.update({f: 2 for f in stage2Features})
+costMap.update({f: 3 for f in stage3Features})
+costMap['isSquare'] = 0 
 
-axFlow.annotate("", xy=(0.15, 0.82), xytext=(0.15, 0.88), arrowprops=passProps)
-axFlow.annotate("", xy=(0.15, 0.62), xytext=(0.15, 0.68), arrowprops=passProps)
-axFlow.annotate("", xy=(0.15, 0.42), xytext=(0.15, 0.48), arrowprops=passProps)
-axFlow.annotate("Ambiguous", xy=(0.65, 0.98), xytext=(0.15, 0.28), arrowprops=dict(facecolor='gray', shrink=0.05, width=2, headwidth=8, alpha=0.3, connectionstyle="angle3,angleA=0,angleB=90"), ha='center')
+colorPalette = {
+    0: '#f1f5f9', # Stage 0: Structural (Slate Gray)
+    1: '#dbeafe', # Stage 1: Algebraic (Light Blue)
+    2: '#dcfce7', # Stage 2: Traversal (Light Green)
+    3: '#fee2e2'  # Stage 3: Spectral (Light Red)
+}
 
-axFlow.annotate("", xy=(0.65, 0.82), xytext=(0.65, 0.88), arrowprops=passProps)
-axFlow.annotate("", xy=(0.65, 0.62), xytext=(0.65, 0.68), arrowprops=passProps)
-axFlow.annotate("", xy=(0.65, 0.42), xytext=(0.65, 0.48), arrowprops=passProps)
-axFlow.annotate("", xy=(0.65, 0.22), xytext=(0.65, 0.28), arrowprops=passProps)
-axFlow.annotate("", xy=(0.78, 0.15), xytext=(0.72, 0.15), arrowprops=arrowProps)
+treeObj = surrogateModel.tree_
+nodeMaxCosts = {}
 
-axFlow.set_xlim(0, 1.0)
-axFlow.set_ylim(0, 1.05)
+def mapTreeCosts(nodeId, currentMax):
+    """Calculates the cumulative computational cost of reaching each node"""
+    if treeObj.children_left[nodeId] != -1:
+        featureIdx = treeObj.feature[nodeId]
+        featureName = allRoutingFeatures[featureIdx]
+        newMax = max(currentMax, costMap.get(featureName, 0))
+        nodeMaxCosts[nodeId] = newMax
+        mapTreeCosts(treeObj.children_left[nodeId], newMax)
+        mapTreeCosts(treeObj.children_right[nodeId], newMax)
+    else:
+        nodeMaxCosts[nodeId] = currentMax
+
+mapTreeCosts(0, 0)
+
+# SAFE DIRECT-STRING PARSING
+# This completely decouples text formatting from array lookups to prevent mislabeled boxes
+for i, textObj in enumerate(annotations):
+    rawText = textObj.get_text()
+    linesList = [line.strip() for line in rawText.split('\n') if line.strip()]
+    
+    # Scikit-Learn always puts the inequality on the first line for internal nodes
+    if len(linesList) > 0 and '<=' in linesList[0]:
+        ineqStr = linesList[0]
+        featurePart, threshPart = ineqStr.split('<=', 1)
+        wrappedFeature = wrapTextEveryTwoWords(featurePart.strip())
+        
+        # Internal Node Format: [Wrapped Var] \n [Inequality] (Samples/Percentages Stripped)
+        newText = f"{wrappedFeature}\n<= {threshPart.strip()}"
+    else:
+        # Safely isolate the class line for leaf nodes
+        classLine = next((line for line in linesList if line.startswith('class')), "")
+        if classLine:
+            className = classLine.replace('class = ', '').replace(' / ', '/')
+            newText = wrapTextEveryTwoWords(className)
+        else:
+            newText = "Leaf Node"
+
+    # Apply the formatted text
+    textObj.set_text(newText)
+    
+    # Apply cumulative computation color
+    maxCost = nodeMaxCosts.get(i, 0)
+    textObj.set_bbox(dict(facecolor=colorPalette.get(maxCost, '#ffffff'), edgecolor='black', boxstyle='round,pad=0.5'))
+
+axFlow.set_title("Unified Agentic Solver Decision Tree\n(Colored by Highest Traversal Cost)", fontsize=16, fontweight='bold')
 
 # ------------------------
 # Empirical Latency Timing
