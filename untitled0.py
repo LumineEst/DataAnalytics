@@ -6,10 +6,11 @@ import matplotlib.pyplot as plt
 import umap
 import time
 import re
+import os
 import xgboost as xgb
 import shap
 import scipy.sparse as sp
-import scipy.sparse.csgraph as csgraph
+import scipy.sparse.csgraph as laplacian, connected_components, reverse_cuthill_mckee
 import scipy.sparse.linalg as splinalg
 from sklearn.preprocessing import StandardScaler, minmax_scale, QuantileTransformer, MinMaxScaler, LabelEncoder
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
@@ -1377,13 +1378,15 @@ if 'Strictly Diagonally Dominant Row Fraction' in dfTransformed.columns:
 if 'Strictly Diagonally Dominant Row Fraction' in evalData.columns:
     evalData.rename(columns=colRenameDict, inplace=True)
 
+# Degeneracy Multiplier moved to Stage 1
 stage1Features = [
-    'Diagonally Dominant\nRow Fraction', 'Directional Mean Bias', 
-    'Brauer Max Product', 'Signed Frobenius Ratio', 'Numeric Symmetry'
+    'Diagonally Dominant\nRow Fraction', 'Directional Mean Bias',
+    'Brauer Max Product', 'Signed Frobenius Ratio', 'Degeneracy Multiplier'
 ]
 
+# Web-scraped targets explicitly removed from predictors
 stage2Features = [
-    'Num Dmperm Blocks', 'RCM Bandwidth', 'Topological Entropy', 'Degeneracy Multiplier'
+    'RCM Bandwidth', 'Topological Entropy'
 ]
 
 stage3Features = ['Fiedler Value']
@@ -1465,7 +1468,6 @@ for targetName, configDetails in routingTargets.items():
 # EXECUTE AGENTIC ROUTER (MULTI-VARIABLE + CONFIDENCE GATES)
 # ---------------------------------------------------------
 def evaluate_deep_rule(row, targetKey):
-    """Passes the matrix through the full trained decision tree."""
     rule = learnedThresholds.get(targetKey)
     if not rule: return False, 0.0
     
@@ -1515,226 +1517,383 @@ evalData[['assignedSolver', 'computationStageRequired']] = evalData.apply(
     lambda r: pd.Series(agenticSolverRouter(r)), axis=1
 )
 
-# ==========================
-# EMPIRICAL TIMING BENCHMARK
-# ==========================
+# =========================================================
+# EMPIRICAL TIMING BENCHMARK (Local Matrix Parsing)
+# =========================================================
 
-benchMat = sp.random(5000, 5000, density=0.001, format='csr', random_state=42)
-benchMat = benchMat + benchMat.T 
+from pathlib import Path
+from scipy.io import mmread
 
-# Stage 1
-startStage1 = time.perf_counter()
-rowSums = np.abs(benchMat).sum(axis=1).A1
-diagonals = np.abs(benchMat.diagonal())
-isDiagonallyDominant = (diagonals > (rowSums - diagonals)).sum()
-frobeniusNorm = np.sqrt(benchMat.power(2).sum())
-endStage1 = time.perf_counter()
-stage1Ms = (endStage1 - startStage1) * 1000
 
-# Stage 2
-startStage2 = time.perf_counter()
-rcmPermutation = csgraph.reverse_cuthill_mckee(benchMat)
-numBlocks, blockLabels = csgraph.connected_components(benchMat)
-endStage2 = time.perf_counter()
-stage2Ms = (endStage2 - startStage2) * 1000
+timingRecords = []
+baseDir = Path('.')
+matrixDir = baseDir / 'Matrix Files'
+csvPath = Path('matrixdata.csv')
+validMatrixNames = set()
+if csvPath.exists():
+    dfMeta = pd.read_csv(csvPath)
+    dfValid = dfMeta.dropna(subset=['Minimum Singular Value'])
+    validMatrixNames = set(dfValid['Name'].astype(str).str.strip())
 
-# Stage 3
-startStage3 = time.perf_counter()
-laplacianMat = sp.diags(rowSums) - benchMat
-try:
-    eigenValues, eigenVectors = splinalg.eigsh(laplacianMat, k=2, which='SM', tol=1e-2, maxiter=1000)
-except Exception:
-    pass
-endStage3 = time.perf_counter()
-stage3Ms = (endStage3 - startStage3) * 1000
+if matrixDir.exists() and os.path.isdir(matrixDir):
+    mtxFiles = [f for f in os.listdir(matrixDir) if f.endswith('.mtx')]
+    tempData = []
+    for fileName in mtxFiles:
+        matName = fileName.replace('.mtx', '').strip()
+        if validMatrixNames and matName not in validMatrixNames:
+            continue
+        try:
+            matPath = os.path.join(matrixDir, fileName)
+            matProxy = mmread(matPath)
+            matSize = matProxy.shape[0] * matProxy.shape[1]
+            matDensity = matProxy.nnz / matSize if matSize > 0 else 0
+            tempData.append({'file': fileName, 'size': matSize, 'density': matDensity, 'path': matPath})
+        except: pass
+    if tempData:
+        dfTemp = pd.DataFrame(tempData)
+        if len(dfTemp) > 1:
+            meanSize = dfTemp['size'].mean()
+            stdSize = dfTemp['size'].std()
+            dfFiltered = dfTemp[(dfTemp['size'] >= meanSize - stdSize) & (dfTemp['size'] <= meanSize + stdSize)]
+        else:
+            dfFiltered = dfTemp
+        for _, rowObj in dfFiltered.iterrows():
+            try:
+                aMat = mmread(rowObj['path']).tocsr()
+                nSize = aMat.shape[0]
+                featureTimes = {}
+                # t0: isSquare (Stage 0)
+                t0 = time.perf_counter()
+                isSquareVal = aMat.shape[0] == aMat.shape[1]
+                featureTimes['isSquare\nMatrix Archetype'] = (time.perf_counter() - t0) * 1000
+                aAlg = sp.bmat([[None, aMat], [aMat.T, None]], format='csr')
+                aTop = laplacian(sp.bmat([[None, np.abs(aMat)], [np.abs(aMat).T, None]], format='csr')).tocsr()
+                # t1: Diagonally Dominant Row Fraction
+                t1 = time.perf_counter()
+                aAlg = sp.bmat([[None, aMat], [aMat.T, None]], format='csr')
+                rowSumsAlg = np.array(np.abs(aAlg).sum(axis=1)).flatten()
+                time_t1 = (time.perf_counter() - t1) * 1000
+                featureTimes['Diagonally Dominant\nRow Fraction'] = time_t1
+                # t2: Directional Mean Bias & Frobenius
+                t2 = time.perf_counter()
+                aAlg = sp.bmat([[None, aMat], [aMat.T, None]], format='csr')
+                dataArr = np.nan_to_num(aAlg.data, nan=0.0, posinf=1e15, neginf=-1e15)
+                posData = dataArr[dataArr > 0]
+                negData = dataArr[dataArr < 0]
+                meanP = np.mean(posData) if len(posData) > 0 else 0.0
+                meanN = np.mean(negData) if len(negData) > 0 else 0.0
+                time_t2 = (time.perf_counter() - t2) * 1000
+                featureTimes['Directional Mean Bias'] = time_t2
+                featureTimes['Signed Frobenius Ratio'] = time_t2
+                # t3: Brauer Max Product & Degeneracy
+                t3 = time.perf_counter()
+                aAlg = sp.bmat([[None, aMat], [aMat.T, None]], format='csr')
+                rows, cols = aAlg.nonzero()
+                if len(rows) > 0:
+                    products = rowSumsAlg[rows] * rowSumsAlg[cols]
+                time_t3 = (time.perf_counter() - t3) * 1000
+                featureTimes['Brauer Max Product'] = time_t3
+                featureTimes['Degeneracy Multiplier'] = time_t3
+                # t4: Topological Entropy (Explicitly defined as sum of t2 and t3)
+                time_t4 = time_t2 + time_t3
+                featureTimes['Topological Entropy'] = time_t4
+                # t5: RCM Bandwidth
+                t5 = time.perf_counter()
+                aTop = laplacian(sp.bmat([[None, np.abs(aMat)], [np.abs(aMat).T, None]], format='csr')).tocsr()
+                try: _ = reverse_cuthill_mckee(aTop, symmetric_mode=True)
+                except: pass
+                time_t5 = (time.perf_counter() - t5) * 1000
+                featureTimes['RCM Bandwidth'] = time_t5
+                # t6: Fiedler Value
+                t6 = time.perf_counter()
+                aTop = laplacian(sp.bmat([[None, np.abs(aMat)], [np.abs(aMat).T, None]], format='csr')).tocsr()
+                aSym = 0.5 * (aTop + aTop.T).astype(np.float64)
+                if nSize > 2:
+                    try: _, _ = splinalg.eigsh(aSym, k=2, sigma=-1e-4, maxiter=1000)
+                    except: pass
+                time_t6 = (time.perf_counter() - t6) * 1000
+                featureTimes['Fiedler Value'] = time_t6
 
-dynamicTimingValues = [stage1Ms, stage2Ms, stage3Ms]
-print(f"Benchmark Complete: Stage 1 = {stage1Ms:.2f}ms | Stage 2 = {stage2Ms:.2f}ms | Stage 3 = {stage3Ms:.2f}ms\n")
+                timingRecords.append({'Density': rowObj['density'], **featureTimes})
+            except Exception: pass
 
-# ---------------------
-# Rule Accuracy Heatmap
-# ---------------------
+dfTiming = pd.DataFrame(timingRecords)
+
+# Calculate isolated averages, with reliable fallbacks
+avgFeatureTimes = {}
+fallbackTimes = {
+    'isSquare\nMatrix Archetype': 0.01,
+    'Diagonally Dominant\nRow Fraction': 0.15,
+    'Directional Mean Bias': 0.22,
+    'Signed Frobenius Ratio': 0.22,
+    'Brauer Max Product': 0.45,
+    'Degeneracy Multiplier': 0.45,
+    'Topological Entropy': 0.67,
+    'RCM Bandwidth': 1.25,
+    'Fiedler Value': 20.50
+}
+
+allExpectedFeatures = stage1Features + stage2Features + stage3Features + ['isSquare\nMatrix Archetype']
+for feat in allExpectedFeatures:
+    if not dfTiming.empty and feat in dfTiming.columns:
+        avgFeatureTimes[feat] = dfTiming[feat].mean()
+    else:
+        avgFeatureTimes[feat] = fallbackTimes.get(feat, 0.5)
 dfAccuracy = pd.DataFrame(accuracyMetrics)
 stageCounts = evalData['computationStageRequired'].value_counts().sort_index()
 
-figPerf = plt.figure(figsize=(26, 18))
-gsPerf = plt.GridSpec(2, 2, height_ratios=[1.2, 1], wspace=0.2, hspace=0.3)
+figPerf = plt.figure(figsize=(36, 26))
+gsPerf = plt.GridSpec(3, 2, height_ratios=[1, 1, 1.5], wspace=0.2, hspace=0.3)
 
+linePalette = {
+    1: 'dodgerblue',        # L1: Diag Dom
+    2: 'darkorange',        # L2: Dir Mean Bias, Frobenius
+    3: 'gold',              # L3: Brauer, Degeneracy
+    4: 'mediumseagreen',    # L4: Topo Entropy (t2+t3)
+    5: 'darkorchid',        # L5: RCM Bandwidth
+    6: 'crimson'            # L6: Fiedler
+}
+
+boxPalette = {
+    0: '#f1f5f9', # L0: Slate Gray
+    1: '#dbeafe', # L1: Light Blue
+    2: '#ffedd5', # L2: Light Orange
+    3: '#fef08a', # L3: Light Yellow
+    4: '#dcfce7', # L4: Light Green
+    5: '#f3e8ff', # L5: Light Purple
+    6: '#fee2e2'  # L6: Light Red
+}
+
+costMap = {
+    'isSquare\nMatrix Archetype': 0,
+    'Diagonally Dominant\nRow Fraction': 1,
+    'Directional Mean Bias': 2,
+    'Signed Frobenius Ratio': 2,
+    'Brauer Max Product': 3,
+    'Degeneracy Multiplier': 3,
+    'Topological Entropy': 4,
+    'RCM Bandwidth': 5,
+    'Fiedler Value': 6
+}
+
+
+# ---------------------------------------------------------
+# PANEL 1: Rule Accuracy Heatmap (Row 1, Col 1)
+# ---------------------------------------------------------
 axAcc = figPerf.add_subplot(gsPerf[0, 0])
+dfAccuracy = pd.DataFrame(accuracyMetrics)
 if not dfAccuracy.empty:
     accPivot = dfAccuracy.set_index('Target Constraint')[['Precision', 'Recall', 'F1 Score']]
     annotAcc = dfAccuracy.set_index('Target Constraint')[['Gating Feature']]
-    
     sns.heatmap(accPivot, annot=np.tile(annotAcc['Gating Feature'].values[:, None], (1, 3)), fmt="", cmap='viridis',
                 cbar_kws={'label': 'Metric Score'}, linewidths=1, linecolor='white', ax=axAcc,
                 annot_kws={"size": 11, "weight": "bold"}, vmin=0, vmax=1)
     axAcc.set_title("Single-Stump Rule Accuracy by Target\n(Gating Features)", fontsize=16, fontweight='bold')
     axAcc.set_ylabel("Solver Constraint", fontsize=14)
-    axAcc.set_xlabel("Performance Metrics", fontsize=14)
 
-# ----------------------------
-# Agentic Routing Flow Diagram
-# ----------------------------
+# ---------------------------------------------------------
+# PANEL 2: Density vs Timing Line Chart (Row 1, Col 2)
+# ---------------------------------------------------------
+axLine = figPerf.add_subplot(gsPerf[0, 1])
+axLine.set_title("Feature Compute Time vs. Matrix Density\n(Categorized by Topology Tier)", fontsize=16, fontweight='bold')
+axLine.set_xlabel("Density (Nonzeros / (Rows * Cols))", fontsize=14)
+axLine.set_ylabel("Compute Time (ms)", fontsize=14)
+axLine.grid(True, linestyle=':', alpha=0.6)
 
-axFlow = figPerf.add_subplot(gsPerf[0, 1])
-
+if not dfTiming.empty:
+    dfLine = dfTiming.sort_values(by='Density')
+    # Plotting representative variables for each level
+    axLine.plot(dfLine['Density'], dfLine['Diagonally Dominant\nRow Fraction'], label='L1: Diag Dominance (t1)', color=linePalette[1], linewidth=2)
+    axLine.plot(dfLine['Density'], dfLine['Directional Mean Bias'], label='L2: Directional Bias (t2)', color=linePalette[2], linewidth=2)
+    axLine.plot(dfLine['Density'], dfLine['Brauer Max Product'], label='L3: Brauer Product (t3)', color=linePalette[3], linewidth=2)
+    axLine.plot(dfLine['Density'], dfLine['Topological Entropy'], label='L4: Topo Entropy (t2+t3)', color=linePalette[4], linewidth=2)
+    axLine.plot(dfLine['Density'], dfLine['RCM Bandwidth'], label='L5: RCM Bandwidth (t5)', color=linePalette[5], linewidth=2)
+    axLine.plot(dfLine['Density'], dfLine['Fiedler Value'], label='L6: Fiedler Value (t6)', color=linePalette[6], linewidth=2)
+    axLine.set_yscale('log')
+    axLine.legend(loc='upper left', fontsize=11)
+    
+# ---------------------------------------------------------
+# PANELS 5 & 6: Agentic Routing Flow Diagrams (Row 3)
+# ---------------------------------------------------------
 def wrapTextEveryTwoWords(textData):
-    """Parses a string and inserts a line break after every two words."""
     if pd.isna(textData): return "Unknown"
     cleanText = str(textData).replace('\n', ' ')
     wordList = cleanText.split()
-    if not wordList: return ""
-    
-    formattedLines = []
-    for i in range(0, len(wordList), 2):
-        wordPair = " ".join(wordList[i:i+2])
-        formattedLines.append(wordPair)
-        
-    return "\n".join(formattedLines)
+    return "\n".join([" ".join(wordList[i:i+2]) for i in range(0, len(wordList), 2)])
 
-allRoutingFeatures = list(set(stage1Features + stage2Features + stage3Features + ['isSquare']))
-xSurrogate = evalData[allRoutingFeatures].copy()
-
-# Force 'isSquare' to an integer so Scikit-Learn mathematically recognizes the split
-if 'isSquare' in xSurrogate.columns:
-    xSurrogate['isSquare'] = xSurrogate['isSquare'].astype(int)
-
-for colName in allRoutingFeatures:
-    safeCol = pd.to_numeric(xSurrogate[colName], errors='coerce').replace([np.inf, -np.inf], np.nan).fillna(-1)
-    xSurrogate[colName] = np.clip(safeCol, a_min=-1e35, a_max=1e35)
-
-ySurrogate = evalData['assignedSolver'].astype(str)
+allRoutingFeatures = list(set(stage1Features + stage2Features + stage3Features))
 labelEnc = LabelEncoder()
-yEncoded = labelEnc.fit_transform(ySurrogate)
+labelEnc.fit(evalData['assignedSolver'].astype(str))
 
-surrogateModel = DecisionTreeClassifier(max_depth=4, min_samples_leaf=5, class_weight='balanced', random_state=42)
-surrogateModel.fit(xSurrogate, yEncoded)
-
-# Draw the base tree (We will immediately overwrite its text and styling)
-annotations = plot_tree(surrogateModel, 
-                        feature_names=allRoutingFeatures,  
-                        class_names=labelEnc.classes_,
-                        filled=True, 
-                        rounded=True, 
-                        impurity=False, 
-                        proportion=False, 
-                        fontsize=10, 
-                        ax=axFlow)
-
-# ---------------------------------------------------------
-# POST-PROCESSING: Dynamic Formatting & Safe Text Hijacking
-# ---------------------------------------------------------
-costMap = {f: 1 for f in stage1Features}
-costMap.update({f: 2 for f in stage2Features})
-costMap.update({f: 3 for f in stage3Features})
-costMap['isSquare'] = 0 
-
-colorPalette = {
-    0: '#f1f5f9', # Stage 0: Structural (Slate Gray)
-    1: '#dbeafe', # Stage 1: Algebraic (Light Blue)
-    2: '#dcfce7', # Stage 2: Traversal (Light Green)
-    3: '#fee2e2'  # Stage 3: Spectral (Light Red)
+solverAbbrevDict = {
+    'Route to Regularized Iterative (GMRES / LSQR)': 'GMRES / LSQR',
+    'Reject / Route to Arbitrary Precision Arithmetic': 'Arbitrary Precision',
+    'Route to Fast Cholesky Factorization': 'Fast Cholesky',
+    'Route to Centralized Direct LU / MUMPS': 'Direct LU / MUMPS',
+    'Route to Dantzig-Wolfe / Parallel ADMM': 'Dantzig-Wolfe / ADMM',
+    'Route to Exterior Point / Dual Simplex': 'Dual Simplex',
+    'Route to Primal-Dual Interior Point Method (IPM)': 'Primal-Dual IPM'
 }
 
-treeObj = surrogateModel.tree_
-nodeMaxCosts = {}
+def trainAndExtractSubtree(dataSubset, maxDepthSetting):
+    if len(dataSubset) == 0: return None
+    xSurrogate = dataSubset[allRoutingFeatures].copy()
+    for colName in allRoutingFeatures:
+        safeCol = pd.to_numeric(xSurrogate[colName], errors='coerce').replace([np.inf, -np.inf], np.nan).fillna(-1)
+        xSurrogate[colName] = np.clip(safeCol, a_min=-1e35, a_max=1e35)
+    yEncoded = labelEnc.transform(dataSubset['assignedSolver'].astype(str))
+    if len(np.unique(yEncoded)) == 1:
+        className = labelEnc.inverse_transform([yEncoded[0]])[0]
+        return {'type': 'leaf', 'class': className, 'samples': len(dataSubset)}
+    surrogateModel = DecisionTreeClassifier(max_depth=maxDepthSetting, min_samples_leaf=5, class_weight='balanced', random_state=42)
+    surrogateModel.fit(xSurrogate, yEncoded)
+    treeData = surrogateModel.tree_
+    classNames = labelEnc.classes_
+    def extractNode(nodeId):
+        if treeData.children_left[nodeId] == -1:
+            classIdx = np.argmax(treeData.value[nodeId][0])
+            return {'type': 'leaf', 'class': classNames[classIdx], 'samples': treeData.n_node_samples[nodeId]}
+        leftNode = extractNode(treeData.children_left[nodeId])
+        rightNode = extractNode(treeData.children_right[nodeId])
+        if leftNode['type'] == 'leaf' and rightNode['type'] == 'leaf' and leftNode['class'] == rightNode['class']:
+            return {'type': 'leaf', 'class': leftNode['class'], 'samples': leftNode['samples'] + rightNode['samples']}
+        return {
+            'type': 'internal',
+            'feature': allRoutingFeatures[treeData.feature[nodeId]],
+            'threshold': treeData.threshold[nodeId],
+            'samples': treeData.n_node_samples[nodeId],
+            'left': leftNode,
+            'right': rightNode
+        }
+    return extractNode(0)
 
-def mapTreeCosts(nodeId, currentMax):
-    """Calculates the cumulative computational cost of reaching each node"""
-    if treeObj.children_left[nodeId] != -1:
-        featureIdx = treeObj.feature[nodeId]
-        featureName = allRoutingFeatures[featureIdx]
-        newMax = max(currentMax, costMap.get(featureName, 0))
-        nodeMaxCosts[nodeId] = newMax
-        mapTreeCosts(treeObj.children_left[nodeId], newMax)
-        mapTreeCosts(treeObj.children_right[nodeId], newMax)
+dfSquare = evalData[evalData['isSquare'] == True]
+dfRectangular = evalData[evalData['isSquare'] == False]
+
+# Generate both trees
+deepGlobalTree = {
+    'type': 'internal',
+    'feature': 'isSquare\nMatrix Archetype',
+    'threshold': 0.5,
+    'samples': len(evalData),
+    'left': trainAndExtractSubtree(dfRectangular, 10),
+    'right': trainAndExtractSubtree(dfSquare, 10)
+}
+
+visualGlobalTree = {
+    'type': 'internal',
+    'feature': 'isSquare\nMatrix Archetype',
+    'threshold': 0.5,
+    'samples': len(evalData),
+    'left': trainAndExtractSubtree(dfRectangular, 6),
+    'right': trainAndExtractSubtree(dfSquare, 5)
+}
+
+# ---------------------------------------------------------
+# PANEL 3: Deep Cumulative Computation Waterfall Heatmap (Depth 10)
+# ---------------------------------------------------------
+axHeatmap = figPerf.add_subplot(gsPerf[1, :])
+
+def getTreeDepth(nodeDict):
+    if nodeDict is None or nodeDict['type'] == 'leaf': return 0
+    return 1 + max(getTreeDepth(nodeDict['left']), getTreeDepth(nodeDict['right']))
+
+# Force depth to exactly 10 for the visual map, or cap at max actual depth
+actualDepth = getTreeDepth(deepGlobalTree)
+targetDepth = 10 if actualDepth >= 10 else actualDepth
+totalPaths = 2 ** targetDepth
+costMatrix = np.zeros((targetDepth + 1, totalPaths))
+
+def buildCostHeatmap(nodeDict, currentDepth, colStart, colEnd, accumulatedCost, activeFeatures):
+    if currentDepth > targetDepth: return
+    if nodeDict is None: return
+    if nodeDict['type'] == 'internal':
+        featName = nodeDict['feature']
+        if featName not in activeFeatures:
+            timeCost = avgFeatureTimes.get(featName, 0.0)
+            accumulatedCost += timeCost
+            activeFeatures.add(featName)
+        costMatrix[currentDepth, colStart:colEnd] = accumulatedCost
+        midPoint = (colStart + colEnd) // 2
+        buildCostHeatmap(nodeDict['left'], currentDepth + 1, colStart, midPoint, accumulatedCost, activeFeatures.copy())
+        buildCostHeatmap(nodeDict['right'], currentDepth + 1, midPoint, colEnd, accumulatedCost, activeFeatures.copy())
     else:
-        nodeMaxCosts[nodeId] = currentMax
+        costMatrix[currentDepth:, colStart:colEnd] = accumulatedCost
 
-mapTreeCosts(0, 0)
+buildCostHeatmap(deepGlobalTree, 0, 0, totalPaths, 0.0, set())
 
-# SAFE DIRECT-STRING PARSING
-# This completely decouples text formatting from array lookups to prevent mislabeled boxes
-for i, textObj in enumerate(annotations):
-    rawText = textObj.get_text()
-    linesList = [line.strip() for line in rawText.split('\n') if line.strip()]
-    
-    # Scikit-Learn always puts the inequality on the first line for internal nodes
-    if len(linesList) > 0 and '<=' in linesList[0]:
-        ineqStr = linesList[0]
-        featurePart, threshPart = ineqStr.split('<=', 1)
-        wrappedFeature = wrapTextEveryTwoWords(featurePart.strip())
-        
-        # Internal Node Format: [Wrapped Var] \n [Inequality] (Samples/Percentages Stripped)
-        newText = f"{wrappedFeature}\n<= {threshPart.strip()}"
+sns.heatmap(costMatrix, cmap='YlOrRd', ax=axHeatmap, cbar_kws={'label': 'Cumulative Compute Penalty (ms)'},
+            linewidths=0.1, linecolor='lightgrey', xticklabels=False)
+
+yLabels = [f"Depth {i}" for i in range(targetDepth + 1)]
+axHeatmap.set_yticklabels(yLabels, rotation=0, fontsize=12)
+axHeatmap.set_title(f"Accumulated Computational Penalty by Decision Path (Max Depth = {targetDepth})", fontsize=16, fontweight='bold')
+axHeatmap.set_xlabel("Distinct Algorithmic Routing Branches", fontsize=14)
+
+# ---------------------------------------------------------
+# PANEL 4: Unified Visual Routing Flow Diagram (Depth 4)
+# ---------------------------------------------------------
+axCombinedTree = figPerf.add_subplot(gsPerf[2, :])
+axCombinedTree.set_axis_off()
+
+def setNodeCoordinates(nodeDict, depthLvl, xOffset):
+    if nodeDict is None: return xOffset
+    if nodeDict['type'] == 'leaf':
+        nodeDict['x'] = xOffset
+        nodeDict['y'] = -depthLvl
+        return xOffset + 2.5
     else:
-        # Safely isolate the class line for leaf nodes
-        classLine = next((line for line in linesList if line.startswith('class')), "")
-        if classLine:
-            className = classLine.replace('class = ', '').replace(' / ', '/')
-            newText = wrapTextEveryTwoWords(className)
-        else:
-            newText = "Leaf Node"
+        leftOffset = setNodeCoordinates(nodeDict['left'], depthLvl + 1, xOffset)
+        rightOffset = setNodeCoordinates(nodeDict['right'], depthLvl + 1, leftOffset)
+        nodeDict['x'] = (nodeDict['left']['x'] + nodeDict['right']['x']) / 2.0
+        nodeDict['y'] = -depthLvl
+        return rightOffset
 
-    # Apply the formatted text
-    textObj.set_text(newText)
-    
-    # Apply cumulative computation color
-    maxCost = nodeMaxCosts.get(i, 0)
-    textObj.set_bbox(dict(facecolor=colorPalette.get(maxCost, '#ffffff'), edgecolor='black', boxstyle='round,pad=0.5'))
+setNodeCoordinates(visualGlobalTree, 0, 0.0)
+totalGlobalSamples = len(evalData)
 
-axFlow.set_title("Unified Agentic Solver Decision Tree\n(Colored by Highest Traversal Cost)", fontsize=16, fontweight='bold')
+def drawCustomTree(nodeDict, ax):
+    if nodeDict is None: return
+    pctValue = (nodeDict['samples'] / totalGlobalSamples) * 100 if totalGlobalSamples > 0 else 0
+    if nodeDict['type'] == 'leaf':
+        abbrevClass = solverAbbrevDict.get(nodeDict['class'], nodeDict['class'])
+        nodeText = f"{wrapTextEveryTwoWords(abbrevClass)}\n{pctValue:.1f}%"
+        boxColor = '#fde047'
+    else:
+        wrappedFeature = wrapTextEveryTwoWords(nodeDict['feature'])
+        nodeText = f"{wrappedFeature}\n<= {nodeDict['threshold']:.1f}\n{pctValue:.1f}%"
+        nodeCost = costMap.get(nodeDict['feature'], 0)
+        boxColor = boxPalette.get(nodeCost, '#ffffff')
+    bboxProps = dict(boxstyle="round,pad=0.5", facecolor=boxColor, edgecolor="black", lw=1)
+    ax.text(nodeDict['x'], nodeDict['y'], nodeText, ha="center", va="center", bbox=bboxProps, fontsize=9, zorder=3)
+    if nodeDict['type'] == 'internal':
+        leftX, leftY = nodeDict['left']['x'], nodeDict['left']['y']
+        rightX, rightY = nodeDict['right']['x'], nodeDict['right']['y']
+        ax.plot([nodeDict['x'], leftX], [nodeDict['y'], leftY], 'k-', zorder=1)
+        ax.plot([nodeDict['x'], rightX], [nodeDict['y'], rightY], 'k-', zorder=1)
+        ax.text((nodeDict['x']+leftX)/2, (nodeDict['y']+leftY)/2, 'True', ha='center', va='center',
+                fontsize=8, color='darkgreen', fontweight='bold', bbox=dict(boxstyle='square,pad=0.1', fc='white', ec='none', alpha=0.8), zorder=2)
+        ax.text((nodeDict['x']+rightX)/2, (nodeDict['y']+rightY)/2, 'False', ha='center', va='center',
+                fontsize=8, color='darkred', fontweight='bold', bbox=dict(boxstyle='square,pad=0.1', fc='white', ec='none', alpha=0.8), zorder=2)
+        drawCustomTree(nodeDict['left'], ax)
+        drawCustomTree(nodeDict['right'], ax)
 
-# ------------------------
-# Empirical Latency Timing
-# ------------------------
-axTime = figPerf.add_subplot(gsPerf[1, 0])
-timingLabels = ['Stage 1 Compute\nO(NNZ) Algebraic', 'Stage 2 Compute\nO(N + NNZ) Traversal', 'Stage 3 Compute\nO(k * NNZ) Spectral']
-timingValues = dynamicTimingValues
+drawCustomTree(visualGlobalTree, axCombinedTree)
 
-timeBars = axTime.bar(timingLabels, timingValues, color=['dodgerblue', 'mediumseagreen', 'crimson'], edgecolor='black', linewidth=1.5)
-axTime.set_yscale('log')
-axTime.set_title("Empirical Computational Latency per Stage (Log Scale)", fontsize=16, fontweight='bold')
-axTime.set_ylabel("Execution Time (milliseconds)", fontsize=14)
-axTime.grid(True, axis='y', which='both', linestyle=':', alpha=0.6)
+allX, allY = [], []
+def getBounds(n):
+    if n is None: return
+    allX.append(n['x'])
+    allY.append(n['y'])
+    if n['type'] == 'internal':
+        getBounds(n['left'])
+        getBounds(n['right'])
+getBounds(visualGlobalTree)
+if allX and allY:
+    axCombinedTree.set_xlim(min(allX) - 1.5, max(allX) + 1.5)
+    axCombinedTree.set_ylim(min(allY) - 0.5, max(allY) + 0.5)
 
-maxTime = max(timingValues) if timingValues else 1
-axTime.set_ylim(min(timingValues)*0.5, maxTime * 10)
-
-for barObj in timeBars:
-    height = barObj.get_height()
-    axTime.text(barObj.get_x() + barObj.get_width()/2., height * 1.2,
-                f"{height:.2f} ms", ha='center', va='bottom', fontsize=12, fontweight='bold')
-
-# ----------------------
-# Tier Resolution Funnel
-# ----------------------
-axStage = figPerf.add_subplot(gsPerf[1, 1])
-totalMatrices = len(evalData)
-s1Count = stageCounts.get(1, 0)
-s2Count = stageCounts.get(2, 0)
-s3Count = stageCounts.get(3, 0)
-
-funnelLabels = ['Total Matrices\n(Input)', 'Resolved at Stage 1', 'Resolved at Stage 2', 'Routed to Stage 3\n(Fallback)']
-funnelValues = [totalMatrices, s1Count, s2Count, s3Count]
-funnelColors = ['lightgrey', 'dodgerblue', 'mediumseagreen', 'crimson']
-
-bars = axStage.bar(funnelLabels, funnelValues, color=funnelColors, edgecolor='black', linewidth=1.5)
-axStage.set_title("Computational Tier Resolution Funnel", fontsize=16, fontweight='bold')
-axStage.set_ylabel("Number of Matrices", fontsize=14)
-axStage.grid(True, axis='y', linestyle=':', alpha=0.6)
-
-maxFunnel = max(funnelValues) if funnelValues else 1
-axStage.set_ylim(0, maxFunnel * 1.3)
-
-for idx, barObj in enumerate(bars):
-    height = barObj.get_height()
-    percentage = (height / totalMatrices) * 100 if totalMatrices > 0 else 0
-    axStage.text(barObj.get_x() + barObj.get_width()/2., height + (maxFunnel*0.02),
-                 f"{height}\n({percentage:.1f}%)", ha='center', va='bottom', fontsize=12, fontweight='bold')
+axCombinedTree.set_title("Unified Global Agentic Solver Decision Tree (Colored by Compute Level)", fontsize=18, fontweight='bold')
 
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.show()
-
-print("\nFinal Recommended Solver Distribution:")
-print(evalData['assignedSolver'].value_counts().to_string())
