@@ -18,8 +18,8 @@ warnings.filterwarnings("ignore", category=UserWarning)
 
 def add_custom_matrix_metrics():
     base_dir = Path('.')
-    csv_file_path = base_dir / 'transforms.csv'
-    matrix_dir = base_dir / 'Matrix Files'
+    csv_file_path = base_dir / 'testMatrices.csv'
+    matrix_dir = base_dir / 'Test Files'
     try:
         df = pd.read_csv(csv_file_path)
     except FileNotFoundError:
@@ -61,6 +61,8 @@ def add_custom_matrix_metrics():
         try:
             # Load proxies into memory
             A = mmread(filepath).tocsr()
+            A.data = np.nan_to_num(A.data, nan=0.0, posinf=1e150, neginf=-1e150)
+            A.eliminate_zeros()
             A_alg = sp.bmat([[None, A], [A.T, None]], format='csr')
             A_top = laplacian(sp.bmat([[None, np.abs(A)], [np.abs(A).T, None]], format='csr'))
             n = A_alg.shape[0]
@@ -68,7 +70,7 @@ def add_custom_matrix_metrics():
             # --- Positivity Metrics (Algebraic) ---
             if pd.isna(df.at[idx, 'Signed Frobenius Ratio']):
                 try:
-                    data = np.nan_to_num(A_alg.data, nan=0.0, posinf=1e150, neginf=-1e150)
+                    data = A_alg.data
                     pos_data = data[data.real > 0]
                     neg_data = data[data.real < 0]
                     if len(pos_data) > 0 or len(neg_data) > 0:
@@ -95,9 +97,11 @@ def add_custom_matrix_metrics():
             # --- RCM Bandwidth (Topological) ---
             if pd.isna(df.at[idx, 'RCM Bandwidth']):
                 try:
-                    perm = reverse_cuthill_mckee(A_top, symmetric_mode=True)
+                    AOne = np.ones_like(A_top.indices, dtype=np.int8)
+                    ASort = sp.csr_matrix((A_top, A_top.indices, A_top.indptr), shape=A_top.shape)
+                    perm = reverse_cuthill_mckee(ASort, symmetric_mode=True)
                     inv_perm = np.argsort(perm)
-                    rows, cols = A_top.nonzero()
+                    rows, cols = ASort.nonzero()
                     if len(rows) > 0:
                         calcs['RCM Bandwidth'] = int(np.max(np.abs(inv_perm[rows] - inv_perm[cols])))
                     else:
@@ -165,19 +169,12 @@ def add_custom_matrix_metrics():
                     except Exception as e:
                         print(f" -> Error calculating Topological Brauer Distances: {e}")   
                 # --- Brauer Center Distances (Topological) ---
-                if pd.isna(df.at[idx, 'Brauer Max Center Distance']):
+                if pd.isna(df.at[idx, 'Strictly Diagonally Dominant Row Fraction']):
                     try:
                         rows, cols = A_top.nonzero()
                         valid_edges = rows != cols
                         u = rows[valid_edges]
                         v = cols[valid_edges]
-                        if len(u) > 0:
-                            center_distances = np.abs(degree_top[u] - degree_top[v])
-                            calcs['Brauer Max Center Distance'] = float(np.max(center_distances))
-                            calcs['Brauer Mean Center Distance'] = float(np.mean(center_distances))
-                        else:
-                            calcs['Brauer Max Center Distance'] = 0.0
-                            calcs['Brauer Mean Center Distance'] = 0.0
                         isolated_count = np.sum(degree_top < 1e-12)
                         calcs['Strictly Diagonally Dominant Row Fraction'] = float(isolated_count / n)
                     except Exception as e:
