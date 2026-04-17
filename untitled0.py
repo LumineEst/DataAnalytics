@@ -37,40 +37,56 @@ from matplotlib.colors import SymLogNorm
 from matplotlib.ticker import FuncFormatter
 import warnings
 warnings.filterwarnings('ignore')
+
+# Set up local caching, to prevent redundant computation 
 os.makedirs('./cached_computations', exist_ok=True)
 cacheDir = Memory(location='./cached_computations', verbose=0)
 
+# Load the raw topological matrix properties and the post-transformation properties.
 dfMatrix = pd.read_csv('matrixdata.csv').set_index('Matrix ID')
 dfTransforms = pd.read_csv('transforms.csv').set_index('Matrix ID')
 
-dfMatrix.columns = dfMatrix.columns.str.strip()
+# Clean up column names by stripping whitespace
 dfTransforms.columns = dfTransforms.columns.str.strip()
+
+# Align the datasets: Ensure we only keep raw matrices that have a corresponding transformed counterpart
 dfMatrix = dfMatrix.loc[dfMatrix.index.isin(dfTransforms.index)]
 dfMatrix = dfMatrix.loc[:, ~dfMatrix.columns.duplicated()]
 dfTransforms = dfTransforms.loc[:, ~dfTransforms.columns.duplicated()]
+
+# Rename verbose columns for cleaner plotting and downstream references
 dfMatrix.rename(columns={'Strictly Diagonally Dominant Row Fraction': 'Diagonally Dominant\nRow Fraction'}, inplace=True)
 dfTransforms.rename(columns={'Strictly Diagonally Dominant Row Fraction': 'Diagonally Dominant\nRow Fraction'}, inplace=True)
 
 # ==========================
 # MATRIX GROUP LOGIC & MASKS
 # ==========================
+# Reset the index to keep Matrix ID as a standard column for subsetting/tracking.
 dfOriginal = dfMatrix.reset_index()
+
+# combine_first is used to backfill missing transformed data with original data.
 dfTransformed = dfTransforms.combine_first(dfMatrix).reset_index()
 
+# Boolean Shape flags:
 dfOriginal['isSquare'] = dfOriginal['Num Rows'] == dfOriginal['Num Cols']
 dfTransformed['isSquare'] = dfTransformed['Num Rows'] == dfTransformed['Num Cols']
 
-# 1. Engineer the target condition columns in dfTransformed FIRST
+# Coerce errors to NaN so that text/garbled data becomes a traceable missing value.
 condCol = pd.to_numeric(dfTransformed['Condition Number'], errors='coerce')
 msvCol = pd.to_numeric(dfTransformed['Minimum Singular Value'], errors='coerce')
+
+# Defining SVD Failure
 dfTransformed['isSvdFailed'] = (condCol.isna() | np.isinf(condCol) | (condCol >= 1e15) | msvCol.isna()).astype(int)
 
+# Dulmage-Mendelsohn (dmperm) blocks dictate structural irreducibility. 
 blockCol = pd.to_numeric(dfTransformed['Num Dmperm Blocks'], errors='coerce')
 dfTransformed['isIrreducible'] = ((blockCol <= 1) | blockCol.isna()).astype(int)
 
+# Rank Collapse occurs when a matrix does not have full numerical rank, making it singular and uninvertible.
 rankCol = pd.to_numeric(dfTransformed['Full Numerical Rank?'], errors='coerce')
 dfTransformed['Rank Collapse'] = np.where(rankCol.isna(), np.nan, (rankCol == 0).astype(int))
 
+# Target flag for routing to fast Cholesky factorization.
 cholCol = pd.to_numeric(dfTransformed['Cholesky Candidate'], errors='coerce')
 dfTransformed['isCholesky'] = (cholCol == 1).astype(int)
 
@@ -80,23 +96,35 @@ brauerCols = ['Brauer Mean Product', 'Brauer Min Product', 'Brauer Max Product',
 
 # Computation of composite metrics
 for df in [dfOriginal, dfTransformed]:
+    # Density: Fraction of non-zero elements. Essential baseline for sparsity.
     if set(['Nonzeros', 'Num Rows', 'Num Cols']).issubset(df.columns):
         df['Density'] = df['Nonzeros'].astype(float) / (df['Num Rows'].astype(float) * df['Num Cols'].astype(float))
+    
+    # RCM Compression: How well did Reverse Cuthill-Mckee reduce the bandwidth?
     if set(['RCM Bandwidth', 'Num Rows']).issubset(df.columns):
         df['RCM Compression Ratio'] = df['RCM Bandwidth'] / df['Num Rows']
+    
+    # Topological Entropy: A custom metric derived during exploratory analysis
     if set(['RCM Compression Ratio', 'Density']).issubset(df.columns):    
         df['Topological Entropy'] = df['RCM Compression Ratio'] / (df['Density'] + 1e-10)
+    
+    # Degeneracy: Combines center distances with bias to flag structural anomalies.
     if set(['Brauer Max Center Distance', 'Directional Mean Bias']).issubset(df.columns):
         df['Degeneracy Multiplier'] = df['Brauer Max Center Distance'] * df['Directional Mean Bias']
+    
+    # Brauer Ratio: Bounds extreme variance. Clipped to 1e35 to prevent float overflow.
     if set(['Brauer Min Product', 'Brauer Max Product']).issubset(df.columns):
         df['Brauer Ratio'] = (np.sqrt(df['Brauer Max Product']) / (np.sqrt(df['Brauer Min Product'] + 1e-10))).replace([np.inf, -np.inf], 1e35)
         df['Brauer Ratio'] = np.clip(df['Brauer Ratio'], a_min=1e-35, a_max=1e35)   
+    
+    # Square Root Normalization: Tames extreme outliers in Brauer metrics.
     for baseCol in brauerCols:
         if baseCol in df.columns:
             safeNumericCol = pd.to_numeric(df[baseCol], errors='coerce').fillna(0)
-            df[baseCol] = np.sqrt(np.maximum(safeNumericCol, 0))
+            df[f'{baseCol} Sqrt'] = np.sqrt(np.maximum(safeNumericCol, 0))
 
 def applyPositivityMask(df):  
+    # Flags matrices that have blown out to infinity on specific directional/positivity metrics.
     mask = pd.Series(False, index=df.index)
     for col in ['Directional Mean Bias', 'Signed Frobenius Ratio']:
         if col in df.columns:
@@ -107,6 +135,7 @@ def applyPositivityMask(df):
 dfOriginal = applyPositivityMask(dfOriginal)
 dfTransformed = applyPositivityMask(dfTransformed)
 
+# Define real-world scientific domains based on group descriptions on Matrix Market
 optimizationGroups = ['LPnetlib', 'GHS_indef', 'Schenk_IBMSDS', 'Schenk_IBMNA', 'Rajat']
 physicsGroups = ['HB', 'Freescale']
 networkGroups = ['LAW', 'SNAP', 'FlowIPM22', 'Pajek']
@@ -120,16 +149,18 @@ def categorizeGroup(g):
 dfOriginal['matrixGroup'] = dfOriginal['Group'].apply(categorizeGroup)
 dfTransformed['matrixGroup'] = dfTransformed['Group'].apply(categorizeGroup)
 
-# Handle structural rank degeneracy
+# Handle structural rank degeneracy (Difference between physical rows and mathematically independent rows)
 if set(['Structural Rank', 'Rank']).issubset(dfOriginal.columns):
     dfOriginal['Rank Degeneracy'] = dfOriginal['Structural Rank'] - dfOriginal['Rank']
 if set(['Structural Rank', 'Rank']).issubset(dfTransformed.columns):
     dfTransformed['Rank Degeneracy'] = dfTransformed['Structural Rank'] - dfTransformed['Rank'] 
 
+# Create isolated subsets for geometry-specific models
 dfSquareOriginal = dfOriginal[dfOriginal['isSquare'] == True].copy()
 dfSquareTransformed = dfTransformed[dfTransformed['isSquare'] == True].copy()
 dfRectangularTransformed = dfTransformed[dfTransformed['isSquare'] == False].copy()
 
+# Double check that rank collapse is populated across all subsets
 for df in [dfSquareOriginal, dfSquareTransformed, dfRectangularTransformed, dfTransformed, dfOriginal]:
     if 'Full Numerical Rank?' in df.columns:
         rankColRF = pd.to_numeric(df['Full Numerical Rank?'], errors='coerce')
@@ -138,24 +169,34 @@ for df in [dfSquareOriginal, dfSquareTransformed, dfRectangularTransformed, dfTr
 # ====================================================
 # WILCOXON SIGNED-RANK TEST OF PRE-POST TRANSFORM DATA
 # ====================================================
+# A non-parametric equivalent of a paired t-test, as topological data is highly skewed (non-normal) 
+# and because we are comparing the *exact same* matrix before and after transformation.
+
 keys = ['Matrix ID', 'Name', 'Group', 'Group.1']
 overlapCols = [c for c in dfMatrix.columns if c in dfTransforms.columns and c not in keys]
 wilcoxonResults = []
+
 if len(overlapCols) > 0:
     for col in overlapCols:
+        # Align data strictly by dropping rows where the computation failed in either state
         pairedDf = pd.DataFrame({
             'Original': pd.to_numeric(dfSquareOriginal[col], errors='coerce'),
             'Transformed': pd.to_numeric(dfSquareTransformed[col], errors='coerce')
         }).replace([np.inf, -np.inf], np.nan).dropna()
+        
         if len(pairedDf) > 0:
             stat, p = stats.wilcoxon(pairedDf['Original'], pairedDf['Transformed'])
             wilcoxonResults.append({'Metric': col, 'WStat': stat, 'PValue': p})
+            
     dfWilcoxon = pd.DataFrame(wilcoxonResults).sort_values(by='PValue')
+
 plt.figure(figsize=(10, max(4, len(dfWilcoxon) * 0.5)))
+# Visual scaling: Convert p-values to -log10. 
 dfWilcoxon['LogP'] = -np.log10(dfWilcoxon['PValue'] + 1e-300)
+
 sns.barplot(data=dfWilcoxon, x='LogP', y='Metric', palette='viridis')
 plt.axvline(-np.log10(0.05), color='red', linestyle='--', label='p=0.05 Threshold')
-plt.title('Wilcoxon Signed-Rank Test Significance (-log10 P-Value)')
+plt.title('Wilcoxon Signed-Rank Test Significance (-log10 P-Value)\n(Impact of Transformations)')
 plt.xlabel('-log10(P-Value)')
 plt.legend()
 plt.tight_layout()
@@ -164,43 +205,57 @@ plt.show()
 # =========================================
 # KRUSKAL-WALLIS H-TEST OF MATRIX GROUPINGS
 # =========================================
+# A non-parametric equivalent of an ANOVA, to test if 3 or more *independent* groups
+# originate from the same statistical distribution.
+
 hTestResults = []
 configs = {'Square Transformed': dfSquareTransformed, 'Rectangular Transformed': dfRectangularTransformed}
 masks = ['isInfinitePositivity', 'matrixGroup']
 ignoreCols = keys + ['Kind', 'Type', 'Author', 'isSquare', 'isInfinitePositivity', 'matrixGroup', 'Gershgorin Discs']
 
 for configName, df in configs.items():
+    # Filter for purely numerical columns to run the stats test on
     numCols = [c for c in df.columns if c not in ignoreCols and pd.api.types.is_numeric_dtype(df[c])]
+    
     for mask in masks:
         uniqueGroups = df[mask].dropna().unique()
-        if len(uniqueGroups) < 2: continue
+        if len(uniqueGroups) < 2: continue # Needs at least 2 groups to compare
+        
         for metric in numCols:
             groupsData = []
+            # Gather valid numeric data for each categorical group
             for g in uniqueGroups:
                 data = df[df[mask] == g][metric].replace([np.inf, -np.inf], np.nan).dropna()
                 if len(data) > 0: groupsData.append(data)
+                
+            # Execute the test if we successfully gathered data for multiple groups
             if len(groupsData) >= 2:
                 try:
                     stat, p = stats.kruskal(*groupsData)
                     hTestResults.append({'DataFrame': configName, 'SplitBy': mask, 'Metric': metric, 'HStat': stat, 'PValue': p})
                 except Exception: pass
+                
 dfHTest = pd.DataFrame(hTestResults).sort_values(by='PValue')
 
-# Visualize H-Test Significance via Heatmap
+# Visualize H-Test Significance via Dual Heatmap
 dfHTest['LogP'] = -np.log10(dfHTest['PValue'] + 1e-300)
 labelMap = {'isInfinitePositivity': 'Positivity\nSkew', 'matrixGroup': 'Matrix\nGroup'}
 dfHTest['SplitByShort'] = dfHTest['SplitBy'].map(labelMap)
+
 dfSquare = dfHTest[dfHTest['DataFrame'] == 'Square Transformed']
 dfRect = dfHTest[dfHTest['DataFrame'] == 'Rectangular Transformed']
+
 fig, axes = plt.subplots(1, 2, figsize=(16, max(8, len(dfHTest['Metric'].unique()) * 0.4)))
 
 # Subplot 1: Square Matrices
 pivotSquareLogP = dfSquare.pivot_table(index='Metric', columns='SplitByShort', values='LogP', fill_value=0)
 pivotSquarePVal = dfSquare.pivot_table(index='Metric', columns='SplitByShort', values='PValue', fill_value=1.0)
+# The color intensity maps to the -log10 value (so hotter = more significant)
 sns.heatmap(pivotSquareLogP, annot=pivotSquarePVal, fmt=".1e", cmap='magma', ax=axes[0], cbar_kws={'label': '-log10(P-Value)'})
 axes[0].set_title('Square Matrices', fontsize=14, fontweight='bold')
 axes[0].set_xlabel('')
 axes[0].set_ylabel('Metric', fontsize=12)
+
 # Subplot 2: Rectangular Matrices
 pivotRectLogP = dfRect.pivot_table(index='Metric', columns='SplitByShort', values='LogP', fill_value=0)
 pivotRectPVal = dfRect.pivot_table(index='Metric', columns='SplitByShort', values='PValue', fill_value=1.0)
@@ -208,7 +263,8 @@ sns.heatmap(pivotRectLogP, annot=pivotRectPVal, fmt=".1e", cmap='magma', ax=axes
 axes[1].set_title('Rectangular Matrices', fontsize=14, fontweight='bold')
 axes[1].set_xlabel('')
 axes[1].set_ylabel('')
-plt.suptitle('Kruskal-Wallis H-Test Significance by Core Matrix Groupings', fontsize=18, fontweight='bold', y=1.02)
+
+plt.suptitle('Kruskal-Wallis H-Test Significance by Core Matrix Groupings\n(Identifying Domain-Specific Topologies)', fontsize=18, fontweight='bold', y=1.02)
 plt.tight_layout()
 plt.show()
 
@@ -216,10 +272,12 @@ plt.show()
 # HIERARCHICAL CLUSTERMAP
 # =======================
 
+# Standardize the 'Rank Collapse' flag across all datasets if the raw column exists.
 for df in [dfSquareOriginal, dfSquareTransformed, dfRectangularTransformed]:
     if 'Full Numerical Rank?' in df.columns:
         df['Rank Collapse'] = (df['Full Numerical Rank?'] == 0).astype(int)
 
+# Define the primary algorithmic failure modes and solvability constraints
 solvabilityTargets = [
     'Condition Number', 'Matrix Norm', 'Num Dmperm Blocks', 'Strongly Connect Components',
     'Rank Collapse', 'Positive Definite', 'Cholesky Candidate'
@@ -228,23 +286,41 @@ solvabilityTargets = [
 configs = [('Rectangular Transformed', dfRectangularTransformed), ('Square Original', dfSquareOriginal), ('Square Transformed', dfSquareTransformed)]
 numTargets = len(solvabilityTargets)
 numConfigs = len(configs)
+
+# Dynamically extract strictly numeric features that aren't target variables or metadata keys
 transformCols = [c for c in dfTransforms.columns if pd.api.types.is_numeric_dtype(dfTransforms[c]) and c not in keys + solvabilityTargets + ['isSquare']]
+
+# Master list of predictors: Combine raw numeric transforms with our custom engineered topological heuristics
 masterPredictors = transformCols + ['Density', 'RCM Compression Ratio', 'Topological Entropy', 'Degeneracy Multiplier', 'Brauer Ratio']
 
 clusterCols = [c for c in masterPredictors if c in dfTransformed.columns]
+
+# Aggregation Strategy: Group matrices into "Archetypes" based on Domain Group, Positivity Skew, and Shape.
 groupedDf = dfTransformed.groupby(['matrixGroup', 'isInfinitePositivity', 'isSquare'])[clusterCols].median()
+
+# Drop features that are entirely null across these archetypes
 groupedDf = groupedDf.replace([np.inf, -np.inf], np.nan).dropna(axis=1, how='all')
+
+# Create readable, multi-line labels for the Clustermap Y-axis
 groupedDf.index = [f"{g[0]}\nPosInf: {g[1]}\nSq: {g[2]}" for g in groupedDf.index]
+
+# Data Prep for Distance Metrics: Ward Linkage requires clean, complete numerical data without infinities.
 imputer = SimpleImputer(strategy='median')
 imputedData = imputer.fit_transform(groupedDf)
 imputedData = np.clip(imputedData, -1e35, 1e35)
+
+# Standardize features so a variable measured in millions doesn't overpower a ratio measured between [0,1].
 scaler = StandardScaler()
 scaledData = scaler.fit_transform(imputedData)
 scaledDf = pd.DataFrame(scaledData, index=groupedDf.index, columns=groupedDf.columns)
+
+# Drop Zero/Low-Variance columns (which break distance calculations) and clip extreme Z-scores for readability
 scaledDf = scaledDf.loc[:, scaledDf.var() > 0.01].clip(lower=-5, upper=5)
+
 plt.figure(figsize=(14, 10))
+# The Clustermap uses Ward linkage to minimize the variance within clusters, grouping archetypes that share similar topological metric signatures.
 cg = sns.clustermap(scaledDf.T, cmap='coolwarm', metric='euclidean', method='ward', figsize=(16, 12), cbar_kws={'label': 'Z-Score'}, xticklabels=True, yticklabels=True)
-cg.fig.suptitle("Hierarchical Clustermap of Metrics (Aggregated by 3 Masks)", fontsize=16, fontweight='bold', x=0.98, y=0.98, ha='right')
+cg.fig.suptitle("Hierarchical Clustermap of Metrics (Aggregated by 3 Masks)\n(Identifying Covariant Feature Blocks)", fontsize=16, fontweight='bold', x=0.98, y=0.98, ha='right')
 plt.setp(cg.ax_heatmap.get_xticklabels(), rotation=45, ha='right')
 plt.show()
 
@@ -256,7 +332,6 @@ xgbFeatures = list (masterPredictors)
 for df in [dfTransformed, dfOriginal, dfSquareOriginal, dfSquareTransformed, dfRectangularTransformed]:
     for col in masterPredictors:
         if col in df.columns:
-            # Create explicit boolean signal columns
             infCol = f"Inf {col}"
             nanCol = f"Missing {col}"
             df[infCol] = np.isinf(pd.to_numeric(df[col], errors='coerce')).astype(int)
@@ -273,27 +348,35 @@ for tIdx, targetCol in enumerate(solvabilityTargets):
         axPc = axes[tIdx * 2, cIdx]
         axBar = axes[tIdx * 2 + 1, cIdx]
         featureCols = [c for c in masterPredictors if c in dfConfig.columns]
+        
         if 'isInfinitePositivity' in dfConfig.columns and 'isInfinitePositivity' not in featureCols: featureCols.append('isInfinitePositivity')
+        
         pcaFeatures = ['Degeneracy Multiplier', 'Topological Entropy', 'Directional Mean Bias', 'Signed Frobenius Ratio', 'Brauer Mean Center Distance']
         tsneFeatures = ['Degeneracy Multiplier', 'Signed Frobenius Ratio', 'Topological Entropy', 'Brauer Mean Center Distance', 'Brauer Mean Product (Top)']
         umapFeatures = ['Topological Entropy', 'Brauer Mean Product (Top)', 'Signed Frobenius Ratio', 'Directional Mean Bias', 'Brauer Ratio']
-        # Replace the 4 invalid Rectangular charts with custom Parallel Coordinates
+        
+        # Non-square matrices physically cannot be evaluated for "Positive Definite" or "Cholesky" conditions.
+        # So Create alternative Charts which evaluate significant combinations to avoid wasting chart space.
         if configName == 'Rectangular Transformed' and targetCol in ['Positive Definite', 'Cholesky Candidate']:
             targetSequence = ['Rank Collapse', 'Matrix Norm', 'Condition Number', 'Num Dmperm Blocks', 'Strongly Connect Components', 'Cholesky Candidate']
             validTargetSeq = [c for c in targetSequence if c in dfConfig.columns]
+            
             if targetCol == 'Positive Definite':
                 customPlots = [(axPc, validTargetSeq, "Target Sequence"), (axBar, pcaFeatures, "PCA Top Loadings")]
             else:
                 customPlots = [(axPc, tsneFeatures, "t-SNE Top Loadings"), (axBar, umapFeatures, "UMAP Top Loadings")]
+                
             for currAx, currCols, currTitle in customPlots:
                 validCols = [c for c in currCols if c in dfConfig.columns]
                 if len(validCols) >= 2:
                     tempDf = dfConfig[validCols + ['matrixGroup']].copy().replace([np.inf, -np.inf], [1e35, -1e35]).dropna()
                     if len(tempDf) > 4:
+                        # Use QuantileTransformer to map skewed data evenly across [0,1], maximizing visual clarity in the Parallel Coordinates plot.
                         dataScaler = QuantileTransformer(output_distribution='uniform', random_state=42)
                         yLabelText = "Uniform Quantiles"
                         for c in validCols:
                             tempDf[c] = dataScaler.fit_transform(tempDf[[c]])
+                            
                         pd.plotting.parallel_coordinates(tempDf, 'matrixGroup', cols=validCols, colormap='plasma', alpha=0.6, ax=currAx)
                         currAx.set_title(f"Rectangular: {currTitle}", fontsize=14, fontweight='bold')
                         currAx.set_xticklabels([c.replace(' ', '\n') for c in validCols], rotation=0, ha='center', fontsize=10)
@@ -303,31 +386,38 @@ for tIdx, targetCol in enumerate(solvabilityTargets):
                         currAx.set_axis_off()
                 else:
                     currAx.set_axis_off()
-            continue # Skip the Random Forest generation for these specific cells
+            continue # Skip the Random Forest generation for these specific intercept cells
 
         # ==================== DATA PREP ====================
         rfData = dfConfig[[targetCol, 'matrixGroup'] + featureCols].copy()
         if 'isInfinitePositivity' in rfData.columns: rfData['isInfinitePositivity'] = rfData['isInfinitePositivity'].astype(int)
+        
         if targetCol not in ['matrixGroup', 'isInfinitePositivity']:
             rfData[targetCol] = pd.to_numeric(rfData[targetCol], errors='coerce').astype(float)
+            
         rfData = rfData.replace([np.inf, -np.inf], [1e35, -1e35])
+        
         for col in featureCols:
             if col != 'isInfinitePositivity':
                 safeCol = pd.to_numeric(rfData[col], errors='coerce').astype(float)
+                # Apply symmetric log1p to compress extreme variance without destroying negative values
                 rfData[col] = np.sign(safeCol) * np.log1p(np.abs(safeCol))
+        
         rfData = rfData.dropna(subset=[targetCol, 'matrixGroup'])
         
         # ==================== MODEL TRAINING ====================
         X = rfData[featureCols].values
+        # Dynamically route to Classification vs Regression based on the mathematical nature of the target
         is_classification = targetCol in ['Rank Collapse', 'Positive Definite', 'Cholesky Candidate']
         
         if is_classification:
             y = rfData[targetCol].astype(int).values
             rf = RandomForestClassifier(n_estimators=100, max_depth=10, min_samples_leaf=2, random_state=42)
-            cvFolds = KFold(n_splits=20, shuffle=True, random_state=42)
+            cvFolds = KFold(n_splits=20, shuffle=True, random_state=42) # 20 Folds = Strict evaluation
             cvScores = cross_val_score(rf, X, y, cv=cvFolds, scoring='accuracy')
             metricLabel = "Accuracy"
         else:
+            # Compress continuous targets that scale exponentially (like Condition Number) so the MSE loss function isn't dominated by massive outliers.
             if targetCol in ['Condition Number', 'Matrix Norm', 'Num Dmperm Blocks', 'Strongly Connect Components']:
                 y = np.log1p(np.clip(rfData[targetCol].values, 0, 1e35))
             else:
@@ -336,41 +426,56 @@ for tIdx, targetCol in enumerate(solvabilityTargets):
             cvFolds = KFold(n_splits=20, shuffle=True, random_state=42)
             cvScores = cross_val_score(rf, X, y, cv=cvFolds, scoring='r2')
             metricLabel = "R²"
+            
         accMean = np.mean(cvScores)
         rf.fit(X, y)
+        
+        # Extract the Top 5 most predictive drivers for this specific target
         importances = pd.Series(rf.feature_importances_, index=featureCols).sort_values(ascending=False)
         topFeatures = importances.head(5).index.tolist()
         topImportances = importances.head(5).values
 
+        # ==================== PLOTTING ====================
         pcData = rfData[topFeatures + [targetCol, 'matrixGroup']].copy()
+        
         for col in topFeatures + [targetCol]:
             if col != 'isInfinitePositivity': pass
+            # MinMax Scale everything to [0,1] so vastly different metrics share the same Parallel Coords Y-Axis
             pcData[col] = minmax_scale(pcData[col])
+            
         renameMap = {col: col.replace(' ', '\n') for col in topFeatures + [targetCol]}
         pcData = pcData.rename(columns=renameMap)
         newTopFeatures = [renameMap[col] for col in topFeatures]
         newTargetCol = renameMap[targetCol]
+        
+        # Sorting Strategy: Count the size of each scientific group and plot the largest groups first to mitigate obfuscation.
         groupCounts = pcData['matrixGroup'].value_counts()
         pcData['count'] = pcData['matrixGroup'].map(groupCounts)
         pcData = pcData.sort_values('count', ascending=False).drop(columns=['count'])
         ordered_cols = [newTargetCol] + newTopFeatures
+        
         pd.plotting.parallel_coordinates(pcData, 'matrixGroup', cols=ordered_cols, colormap='viridis', alpha=0.6, ax=axPc)
 
         if tIdx == 0:
             axPc.set_title(f"{configName}\n\nTarget: {targetCol}", fontsize=18, fontweight='bold')
         else:
             axPc.set_title(f"Target: {targetCol}", fontsize=16, fontweight='bold')
+            
         axPc.set_xticklabels(axPc.get_xticklabels(), rotation=0, ha='center', fontsize=12)
         axPc.set_ylabel("Normalized Value [0, 1]", fontsize=12)
         axPc.legend(loc='upper right')
-        barLabels = [f.replace(' ', '\n') for f in topFeatures]
         
+        # Feature Importance Bar Plot
+        barLabels = [f.replace(' ', '\n') for f in topFeatures]
         sns.barplot(x=topImportances, y=barLabels, ax=axBar, palette='mako')
+        
         accColor = 'darkred' if accMean < 0.5 else 'darkgreen'
         axBar.set_title(f"Model {metricLabel} (5-Fold CV): {accMean:.2f}", fontsize=14, fontweight='bold', color=accColor)
         axBar.set_xlabel("Relative Importance Contribution", fontsize=12)
         axBar.set_xlim(0, 1.0)
+        
         if tIdx < numTargets - 1:
+            # Draw a thick visual divider line between targets in the massive subplot grid
             axBar.axhline(y=len(barLabels), color='black', linewidth=4, alpha=0.5, clip_on=False)
 
 plt.tight_layout()
@@ -863,7 +968,7 @@ plt.show()
 # DECISION TREES: FAILURE MODES
 # =============================
 
-treeFeatures = ['Topological Entropy', 'RCM Bandwidth', 'Diagonally Dominant\nRow Fraction', 'isSquare', 'Density', 'Degeneracy Multiplier', 'Signed Frobenius Ratio',
+treeFeatures = ['Topological Entropy', 'RCM Bandwidth', 'Diagonally Dominant\nRow Fraction', 'isSquare', 'Density', 'Degeneracy Multiplier', 
                 'Signed Frobenius Ratio', 'Brauer Max Product', 'Brauer Ratio']
 masterTreeData = dfTransformed.copy()
 
@@ -909,7 +1014,7 @@ for idx, targetCol in enumerate(binaryTargets):
     # Grid Search for the mathematically optimal tree structure
     @cacheDir.cache
     def get_optimal_failure_tree(xData, yData, targetName):
-        baseTree = DecisionTreeClassifier(class_weight='balanced', random_state=42)
+        baseTree = DecisionTreeClassifier(random_state=42)
         mcCv = StratifiedShuffleSplit(n_splits=20, test_size=0.2, random_state=42)
         gridSearch = GridSearchCV(baseTree, paramGrid, cv=mcCv, scoring='balanced_accuracy', n_jobs=-1)
         gridSearch.fit(xData, yData)
@@ -1217,7 +1322,7 @@ for tIdx, targetCol in enumerate(matrixTargets):
         xFilteredImp = SimpleImputer(strategy='median', add_indicator=True).fit_transform(xFiltered)
         if isClassification:
             miScores = mutual_info_classif(xFilteredImp, binaryY, n_neighbors=nNeighbors, random_state=42)
-            linPipelineClassif = make_pipeline(StandardScaler(), LogisticRegression(penalty='l1', solver='saga', C=0.1, random_state=42, max_iter=5000, class_weight='balanced'))
+            linPipelineClassif = make_pipeline(StandardScaler(), LogisticRegression(penalty='l1', solver='saga', C=0.1, random_state=42, max_iter=5000))
             try:
                 yPredProbLin = cross_val_predict(linPipelineClassif, xFiltered, binaryY, cv=5, method='predict_proba')[:, 1]
                 linPrAuc = average_precision_score(binaryY, yPredProbLin)
@@ -1523,10 +1628,7 @@ for targetCol in expertTargets:
             'features': cleanFeatureNames,
             'algo': algoTag
         })
-        
-for plotData in validShapPlots:
-    plotData['totalVariance'] = np.sum(np.var(plotData['shapValues'], axis=0))
-if len(validShapPlots) > 20: validShapPlots.remove(min(validShapPlots, key=lambda x: x['totalVariance']))
+    
 
 # Calculate grid size (Force 3 columns wide, variable rows)
 numCols = 5
@@ -1758,7 +1860,7 @@ for tIdx, targetCol in enumerate(riskAnalysisTargets):
         paramGrid = {'max_depth': [2, 3, 4], 'min_samples_leaf': [5, 10], 'ccp_alpha': [0.0, 0.015]}
         cvSplits = max(3, min(5, sum(ySub), len(ySub) - sum(ySub)))
         mcCv = StratifiedShuffleSplit(n_splits=cvSplits, test_size=0.2, random_state=42)
-        baseTree = DecisionTreeClassifier(class_weight='balanced', random_state=42)
+        baseTree = DecisionTreeClassifier(random_state=42)
         grid = GridSearchCV(baseTree, paramGrid, cv=mcCv, scoring='balanced_accuracy')
         grid.fit(xSub, ySub)
         bestModel = grid.best_estimator_
@@ -2061,7 +2163,7 @@ routingTargets = {
     'isCholesky': {'features': stage1Features, 'action': 'Route to Fast Cholesky Factorization'},
     'isIrreducible': {
         'features': list(set(stage1Features + stage2Features + stage3Features)),
-        'action': 'Route to Centralized Direct LU / MUMPS'
+        'action': 'Route to Multifrontal LU (MUMPS) / LDLT'
     },
     'isDecomposable': {
         'features': list(set(stage1Features + stage2Features + stage3Features)),
@@ -2093,6 +2195,10 @@ else:
         for targetName, configDetails in routingTargets.items():
             if shapeName == 'Rect' and targetName in ['isCholesky', 'isIrreducible', 'Positive Definite']: continue
             allowedFeatures = configDetails['features']
+            
+            if shapeName == 'Rect': 
+                squareOnlyFeatures = ['Skew-Symmetric Frobenius Norm', 'Diagonal Dominance Min Ratio']
+                allowedFeatures = [f for f in allowedFeatures if f not in squareOnlyFeatures]
             treeData = shapeData[allowedFeatures + [targetName]].copy()
             if treeData[targetName].dtype == object:
                 treeData[targetName] = treeData[targetName].replace({'yes': 1, 'no': 0, 'Yes': 1, 'No': 0, '1': 1, '0': 0})
@@ -2127,23 +2233,21 @@ else:
                 # 2. Robust Bayesian Hyperparameter Sweep (Optuna with Internal CV)
                 def objective(trial):
                     suggestedDepth = trial.suggest_int('max_depth', 2, 6)
-                    minSub = 0.8 if len(xTrain) < 100 else 0.5
-                    weightCap = max(1.0, negCount /(posCount + 1e-5))
                     growPolicy = trial.suggest_categorical('grow_policy', {'depthwise', 'lossguide'})
                     params = {
                         'n_estimators': trial.suggest_int('n_estimators', 50, 500),
                         'max_depth': suggestedDepth,
                         'grow_policy': growPolicy,
                         'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.2, log=True),
-                        'subsample': trial.suggest_float('subsample', minSub, 1.0), # Aggressive row sampling
-                        'colsample_bytree': trial.suggest_float('colsample_bytree', minSub, 0.8), # Aggressive feature sampling
+                        'subsample': trial.suggest_float('subsample', 0.8, 1.0), # Aggressive row sampling
+                        'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 0.9), # Aggressive feature sampling
                         'colsample_bylevel': trial.suggest_float('colsample_bylevel', 0.5, 1.0),
                         'min_child_weight': trial.suggest_int('min_child_weight', 0.5, 5), # Prevent outlier isolation
                         'max_delta_step': trial.suggest_int('max_delta_step', 1, 7),
                         'gamma': trial.suggest_float('gamma', 0.01, 3.0, log=True), # Strict loss-reduction threshold
                         'reg_alpha': trial.suggest_float('reg_alpha', 0.01, 10.0, log=True),
                         'reg_lambda': trial.suggest_float('reg_lambda', 0.01, 100.0, log=True),
-                        'scale_pos_weight': trial.suggest_float('scale_pos_weight', 1.0, weightCap),
+                        'scale_pos_weight': 1.0,
                         'n_jobs': -1
                     }
     
@@ -2258,13 +2362,12 @@ else:
 # ---------------------------------------------------------
 solverAbbrevDict = {  
     'Route to Regularized Iterative (GMRES / LSQR)': 'GMRES / LSQR',
-    'Route to AP: Dense Factorization': 'Dense Factorization',
-    'Route to AP: Compiled MPLAPACK': 'MPLAPACK',
-    'Route to AP: Iterative (GMRES / MPFR)': 'GMRES / MPFR',
     'Route to Rank-Revealing QR (RRQR) / TSVD': 'RRQR / TSVD',
-    'Route to Multifrontal LU (MUMPS) / LDLT': 'MUMPS / LDLT',
+    'Route to Arbitrary Precision LU (MPFR)': 'AP: Dense LU',
+    'Route to Arbitrary Precision GMRES (MPFR)': 'AP: Iterative GMRES',
+    'Route to Multifrontal LDLT (MUMPS)': 'MUMPS (LDLT)',
+    'Route to Centralized Direct LU / MUMPS': 'MUMPS (LU)',
     'Route to Fast Cholesky Factorization': 'Fast Cholesky',
-    'Route to Centralized Direct LU / MUMPS': 'Direct LU / MUMPS',
     'Route to Dantzig-Wolfe / Parallel ADMM': 'Dantzig-Wolfe / ADMM',
     'Route to Exterior Point / Dual Simplex': 'Dual Simplex',
     'Route to Primal-Dual Interior Point Method (IPM)': 'Primal-Dual IPM'
@@ -2282,8 +2385,7 @@ def evaluate_deep_rule(row, targetKey):
         xVal.append(np.clip(val, a_min=-1e35, a_max=1e35))
     xDf = pd.DataFrame([xVal], columns=rule['features'])
     prob = rule['model'].predict_proba(xDf)[0][1]
-    if targetKey in ['isSvdFailed', 'Positive Definite', 'isCholesky']: safeThreshold = max(rule['optimalThreshold'], 0.50)
-    else: safeThreshold = rule['optimalThreshold']
+    safeThreshold = rule['optimalThreshold']
     pred = 1 if prob >= safeThreshold else 0
     if rule.get('invertLogic', False):
         return pred == 0, 1.0 - prob if pred == 0 else prob
@@ -2291,63 +2393,82 @@ def evaluate_deep_rule(row, targetKey):
 
 def agenticSolverRouter(row):
     isSquare = row.get('isSquare', 1) == 1
-    predSvd, _ = evaluate_deep_rule(row, 'isSvdFailed')
-    nRows = pd.to_numeric(row.get('Num Rows', 0), errors='coerce')
-    density = pd.to_numeric(row.get('Density', 1.0), errors='coerce')
-    if predSvd:
-        if nRows < 2000:
-            return 'Route to AP: Dense Factorization', 1
-        elif density > 0.05:
-            return 'Route to AP: Compiled MPLAPACK', 1
-        else:
-            return 'Route to AP: Iterative (GMRES / MPFR)', 1
-    predRank, _ = evaluate_deep_rule(row, 'Rank Collapse')
-    if not isSquare:
-        if predRank: return 'Route to Rank-Revealing QR (RRQR) / TSVD', 1
-        return 'Route to Regularized Iterative (GMRES / LSQR)', 2
-    predChol, _ = evaluate_deep_rule(row, 'isCholesky')
-    predIrred, _ = evaluate_deep_rule(row, 'isIrreducible')
-    predDecomp, _ = evaluate_deep_rule(row, 'isDecomposable')
-    predDegen, _ = evaluate_deep_rule(row, 'isDegenerate')
+    
+    # 1. Ultra-stable matrices (Bypass everything)
     predPD, _ = evaluate_deep_rule(row, 'Positive Definite')
-    if predPD:
-        predChol = True
-    if predRank: return 'Route to Rank-Revealing QR (RRQR) / TSVD', 1
-    if not predChol and predIrred: return 'Route to Multifrontal LU (MUMPS) / LDLT', 2    
+    predChol, _ = evaluate_deep_rule(row, 'isCholesky')
+    if predPD: predChol = True
     if predChol: return 'Route to Fast Cholesky Factorization', 1
-    if predIrred: return 'Route to Centralized Direct LU / MUMPS', 2
+    
+    # 2. Singular/Rank-Deficient (Must precede SVD check)
+    predRank, _ = evaluate_deep_rule(row, 'Rank Collapse')
+    if predRank: return 'Route to Rank-Revealing QR (RRQR) / TSVD', 1
+    
+    # Non-Square iterative fallback
+    if not isSquare:
+        return 'Route to Regularized Iterative (GMRES / LSQR)', 2
+
+    # 3. Ill-Conditioned but Full-Rank (AP Net)
+    predSvd, _ = evaluate_deep_rule(row, 'isSvdFailed')
+    if predSvd:
+        return 'Route to Arbitrary Precision Arithmetic', 1
+        
+    # 4. Degenerate bases (Must precede MUMPS)
+    predDegen, _ = evaluate_deep_rule(row, 'isDegenerate')
     if predDegen: return 'Route to Exterior Point / Dual Simplex', 2
+
+    # 5. Highly Connected / Irreducible (MUMPS Split)
+    predIrred, _ = evaluate_deep_rule(row, 'isIrreducible')
+    if predIrred: 
+        baseSymmetry = pd.to_numeric(row.get('Skew-Symmetric Frobenius Norm', 1.0), errors='coerce')
+        if baseSymmetry < 1e-10:
+            return 'Route to Multifrontal LDLT (MUMPS)', 2
+        else:
+            return 'Route to Centralized Direct LU / MUMPS', 2    
+    
+    predDecomp, _ = evaluate_deep_rule(row, 'isDecomposable')
     if predDecomp: return 'Route to Dantzig-Wolfe / Parallel ADMM', 2
+    
     return 'Route to Primal-Dual Interior Point Method (IPM)', 3
 
 def getGroundTruthSolver(row):
     isSquare = row.get('isSquare', 1) == 1
-    svdFail = row.get('isSvdFailed', 0) == 1
-    nRows = pd.to_numeric(row.get('Num Rows', 0), errors='coerce')
-    density = pd.to_numeric(row.get('Density', 1.0), errors='coerce')
-    if svdFail:
-        if nRows < 2000:
-            return 'Route to AP: Dense Factorization'
-        elif density > 0.05:
-            return 'Route to AP: Compiled MPLAPACK'
-        else:
-            return 'Route to AP: Iterative (GMRES / MPFR)'
-    rankCol = row.get('Rank Collapse', 0) == 1
-    if not isSquare:
-        if rankCol: return 'Route to Rank-Revealing QR (RRQR) / TSVD'
-        return 'Route to Regularized Iterative (GMRES / LSQR)'
+    
+    # 1. Cholesky
     isChol = row.get('isCholesky', 0) == 1
     if pd.to_numeric(row.get('Positive Definite', 0), errors='coerce') == 1:
         isChol = True
-    irred = row.get('isIrreducible', 0) == 1
-    decomp = row.get('isDecomposable', 0) == 1
-    degen = row.get('isDegenerate', 0) == 1
-    if rankCol: return 'Route to Rank-Revealing QR (RRQR) / TSVD'
-    if not isChol and irred: return 'Route to Multifrontal LU (MUMPS) / LDLT'
     if isChol: return 'Route to Fast Cholesky Factorization'
-    if irred: return 'Route to Centralized Direct LU / MUMPS'
+
+    # 2. Rank Collapse
+    rankCol = row.get('Rank Collapse', 0) == 1
+    if rankCol: return 'Route to Rank-Revealing QR (RRQR) / TSVD'
+    
+    # Non-square fallback
+    if not isSquare:
+        return 'Route to Regularized Iterative (GMRES / LSQR)'
+
+    # 3. SVD Failures
+    svdFail = row.get('isSvdFailed', 0) == 1
+    if svdFail:
+        return 'Route to Arbitrary Precision Arithmetic'
+        
+    # 4. Degenerate
+    degen = row.get('isDegenerate', 0) == 1
     if degen: return 'Route to Exterior Point / Dual Simplex'
+    
+    # 5. MUMPS
+    irred = row.get('isIrreducible', 0) == 1
+    if irred: 
+        baseSymmetry = pd.to_numeric(row.get('Skew-Symmetric Frobenius Norm', 1.0), errors='coerce')
+        if baseSymmetry < 1e-10:
+            return 'Route to Multifrontal LDLT (MUMPS)'
+        else:
+            return 'Route to Centralized Direct LU / MUMPS'
+    
+    decomp = row.get('isDecomposable', 0) == 1
     if decomp: return 'Route to Dantzig-Wolfe / Parallel ADMM'
+    
     return 'Route to Primal-Dual Interior Point Method (IPM)'
 
 # 1. Generate the initial predictions using your XGBoost logic
@@ -2458,7 +2579,7 @@ def trainAndExtractSubtree(dataSubset, maxDepthSetting, matrixShape):
         className = labelEnc.inverse_transform([yEncoded[0]])[0] if len(yEncoded) > 0 else "Unknown"
         return {'type': 'leaf', 'class': className, 'samples': len(validSubset)}
 
-    baseTreePath = DecisionTreeClassifier(class_weight='balanced', random_state=42)
+    baseTreePath = DecisionTreeClassifier(random_state=42)
     ccpPath = baseTreePath.cost_complexity_pruning_path(xSurrogate, yEncoded)
 
     rawAlphas = ccpPath.ccp_alphas
@@ -2476,7 +2597,20 @@ def trainAndExtractSubtree(dataSubset, maxDepthSetting, matrixShape):
         'ccp_alpha': validAlphas
     }
 
-    baseTree = DecisionTreeClassifier(class_weight='balanced', random_state=42)
+    if matrixShape == 'Rect':
+  
+        paramGrid = {
+            'criterion': ['gini'],
+            'max_depth': [3],
+            'max_features': [None],
+            'max_leaf_nodes': [None],
+            'min_samples_split': [10],
+            'min_samples_leaf': [5],
+            'min_impurity_decrease': [0.0],
+            'ccp_alpha': [0.0]
+        }
+        
+    baseTree = DecisionTreeClassifier(random_state=42)
     cvSplit = max(3, min(20,len(validSubset)//5))
     cvStrategy = StratifiedShuffleSplit(n_splits=cvSplit, test_size=0.2, random_state=42)
     grid = GridSearchCV(baseTree, paramGrid, cv=cvStrategy, scoring='balanced_accuracy', n_jobs=-1, verbose=1)
@@ -2507,6 +2641,18 @@ def trainAndExtractSubtree(dataSubset, maxDepthSetting, matrixShape):
             'right': rightNode
         }
     return extractNode(0)
+
+def expandArbitraryPrecisionTarget(row, targetCol):
+    if row[targetCol] == 'Route to Arbitrary Precision Arithmetic':
+        numRows = pd.to_numeric(row.get('Num Rows', 0), errors='coerce')
+        
+        # Simple size threshold: Small goes to Dense, Large goes to Iterative
+        if numRows < 2000: 
+            return 'Route to Arbitrary Precision LU (MPFR)'
+        else: 
+            return 'Route to Arbitrary Precision GMRES (MPFR)'
+            
+    return row[targetCol]
 
 def truncateTree(nodeDict, currentDepth, maxDepth):
     if nodeDict is None: return None
@@ -2551,6 +2697,76 @@ visualGlobalTree = {
     'left': truncateTree(deepRectTree, 1, 4),
     'right': truncateTree(deepSquareTree, 1, 6)
 }
+
+def injectArbitraryPrecisionRules(nodeDict, dfSubset):
+    if nodeDict is None: return None
+    
+    # Hunt for the surrogate's AP leaf
+    if nodeDict['type'] == 'leaf' and 'Arbitrary Precision' in str(nodeDict.get('class', '')):
+        apData = dfSubset[dfSubset['isSvdFailed'] == 1]
+        
+        # Base Case: No SVD Failures at all in this branch
+        if len(apData) == 0:
+            return {'type': 'leaf', 'class': 'Arbitrary Precision', 'samples': 0}
+            
+        denseData = apData[apData['Num Rows'] < 2000]
+        remData = apData[apData['Num Rows'] >= 2000]
+        
+        denseCount = len(denseData)
+        remCount = len(remData)
+        
+        # Pruning Check 1: If everything is Dense, collapse to a single leaf
+        if remCount == 0:
+            return {'type': 'leaf', 'class': 'Dense Factorization', 'samples': denseCount}
+            
+        lapackCount = len(remData[remData['Density'] > 0.05])
+        iterCount = len(remData[remData['Density'] <= 0.05])
+        
+        # Build the Density Split (Right Side)
+        if lapackCount == 0 and iterCount == 0:
+             rightNode = None # Failsafe
+        elif lapackCount == 0:
+             # Pruning Check 2: If no MPLAPACK, collapse Density split to Iterative
+             rightNode = {'type': 'leaf', 'class': 'GMRES / MPFR', 'samples': iterCount}
+        elif iterCount == 0:
+             # Pruning Check 3: If no Iterative, collapse Density split to MPLAPACK
+             rightNode = {'type': 'leaf', 'class': 'MPLAPACK', 'samples': lapackCount}
+        else:
+             # Standard Density Split
+             rightNode = {
+                 'type': 'internal',
+                 'feature': 'Density',
+                 'threshold': 0.05,
+                 'samples': remCount,
+                 'class': 'Arbitrary Precision',
+                 'left': {'type': 'leaf', 'class': 'GMRES / MPFR', 'samples': iterCount},
+                 'right': {'type': 'leaf', 'class': 'MPLAPACK', 'samples': lapackCount}
+             }
+             
+        # Pruning Check 4: If no Dense matrices, skip the Num Rows split entirely
+        if denseCount == 0:
+            return rightNode
+            
+        # Full Unpruned Split
+        return {
+            'type': 'internal',
+            'feature': 'Num Rows',
+            'threshold': 1999.9,
+            'samples': len(apData),
+            'class': 'Arbitrary Precision',
+            'left': {'type': 'leaf', 'class': 'Dense Factorization', 'samples': denseCount},
+            'right': rightNode
+        }
+    
+    # Continue traversing the tree
+    if nodeDict['type'] == 'internal':
+        nodeDict['left'] = injectArbitraryPrecisionRules(nodeDict['left'], dfSubset)
+        nodeDict['right'] = injectArbitraryPrecisionRules(nodeDict['right'], dfSubset)
+        
+    return nodeDict
+
+# Execute the injection immediately after defining visualGlobalTree
+visualGlobalTree = injectArbitraryPrecisionRules(visualGlobalTree, evalData)
 
 # ---------------------------------------------------------
 # PANEL 1: Rule Accuracy Heatmap (Row 1, Col 1)
@@ -2795,7 +3011,7 @@ dfTestEngineered['Classification Result'] = np.where(dfTestEngineered[targetRout
 allRoutingFeatures = list(set(stage1Features + stage2Features + stage3Features))
 trainScaledDfFull, testScaledDfFull = prepareFullTestData(dfTrainEngineered, dfTestEngineered, allRoutingFeatures)
 
-# 2. Reconstruct the Untargetted Kernel PCA Projection
+# 2. Reconstruct the Untargeted Kernel PCA Projection
 targetPCACols = bestResults['PCA']['prunedCols']
 trainRawForPCA = dfTrainEngineered[targetPCACols].copy()
 testRawForPCA = dfTestEngineered[targetPCACols].copy()
@@ -2825,6 +3041,14 @@ dfCombinedFull[targetRoutingGroup] = dfCombinedFull.apply(getGroundTruthSolver, 
 routerOutputsComb = dfCombinedFull.apply(agenticSolverRouter, axis=1)
 dfCombinedFull['Predicted Target'] = [res[0] for res in routerOutputsComb]
 
+# Expand the unified predictions back into specific rules for the heatmap
+dfCombinedFull[targetRoutingGroup] = dfCombinedFull.apply(lambda r: expandArbitraryPrecisionTarget(r, targetRoutingGroup), axis=1)
+dfCombinedFull['Predicted Target'] = dfCombinedFull.apply(lambda r: expandArbitraryPrecisionTarget(r, 'Predicted Target'), axis=1)
+
+# Now your existing abbreviation mapping will catch the expanded routes normally:
+dfCombinedFull['Abbrev Truth'] = dfCombinedFull[targetRoutingGroup].map(solverAbbrevDict).fillna(dfCombinedFull[targetRoutingGroup])
+dfCombinedFull['Abbrev Pred'] = dfCombinedFull['Predicted Target'].map(solverAbbrevDict).fillna(dfCombinedFull['Predicted Target'])
+
 knownClasses = list(solverAbbrevDict.keys())
 yProbaComb = np.zeros((len(dfCombinedFull), len(knownClasses)))
 for idx, predClass in enumerate(dfCombinedFull['Predicted Target']):
@@ -2835,7 +3059,7 @@ yTestBinComb = label_binarize(dfCombinedFull[targetRoutingGroup], classes=knownC
 # FINAL VALIDATION PLOTTING
 # ============================
 figVal, axesVal = plt.subplots(2, 2, figsize=(22, 18))
-figVal.suptitle("Final Validation: Core Constraints & Targetted Kernel-PCA Topology Overlay", fontsize=22, fontweight='bold')
+figVal.suptitle("Final Validation: Core Constraints & Targeted Kernel-PCA Topology Overlay", fontsize=22, fontweight='bold')
 
 # --- TOP LEFT: Distribution Shift (Cohen's d style for ALL used features) ---
 shiftData = []
@@ -2863,11 +3087,23 @@ incorrectMask = dfTestEngineered['Classification Result'] == 'Incorrect'
 axesVal[0, 1].scatter(dfTestEngineered.loc[correctMask, 'final_PCA_1'], dfTestEngineered.loc[correctMask, 'final_PCA_2'], c='blue', marker='o', s=100, alpha=0.7, edgecolor='white', label='Test Correctly Routed')
 axesVal[0, 1].scatter(dfTestEngineered.loc[incorrectMask, 'final_PCA_1'], dfTestEngineered.loc[incorrectMask, 'final_PCA_2'], c='red', marker='X', s=120, alpha=0.8, edgecolor='black', label='Test Misrouted')
 
-axesVal[0, 1].set_title("Test Set Routing Accuracy on Targetted KernelPCA Overlay", fontsize=14, fontweight='bold')
+axesVal[0, 1].set_title("Test Set Routing Accuracy on Targeted KernelPCA Overlay", fontsize=14, fontweight='bold')
 axesVal[0, 1].legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=10)
 
 # --- BOTTOM LEFT: Core Constraint ROC-AUC ---
 coreConditions = ['isSvdFailed', 'Rank Collapse', 'Positive Definite', 'isCholesky', 'isIrreducible', 'isDecomposable', 'isDegenerate']
+
+# Map raw variables to clean display names
+cleanLabelMap = {
+    'isSvdFailed': 'SVD Failed',
+    'Rank Collapse': 'Rank Collapse',
+    'Positive Definite': 'Positive Definite',
+    'isCholesky': 'Cholesky Candidate',
+    'isIrreducible': 'Irreducible',
+    'isDecomposable': 'Decomposable',
+    'isDegenerate': 'Degenerate'
+}
+
 cmap = plt.get_cmap("tab10")
 
 for i, condition in enumerate(coreConditions):
@@ -2878,10 +3114,12 @@ for i, condition in enumerate(coreConditions):
         _, prob = evaluate_deep_rule(row, condition)
         true_labels.append(int(true_val > 0))
         pred_probs.append(prob)
+        
     if len(true_labels) > 0 and len(np.unique(true_labels)) > 1:
         fpr, tpr, _ = roc_curve(true_labels, pred_probs)
         rocAuc = auc(fpr, tpr)
-        axesVal[1, 0].plot(fpr, tpr, lw=2, color=cmap(i % 10), label=f'{condition} (AUC = {rocAuc:.2f})')
+        cleanName = cleanLabelMap.get(condition, condition)
+        axesVal[1, 0].plot(fpr, tpr, lw=2, color=cmap(i % 10), label=f'{cleanName} (AUC = {rocAuc:.2f})')
 
 axesVal[1, 0].plot([0, 1], [0, 1], color='black', lw=2, linestyle='--')
 axesVal[1, 0].set_xlim([0.0, 1.0])
@@ -2892,20 +3130,41 @@ axesVal[1, 0].set_title('ROC-AUC: Core AI Constraint Predictions (Combined Sets)
 axesVal[1, 0].legend(loc="lower right", fontsize=10)
 
 # --- BOTTOM RIGHT: Heatmap ---
-dfCombinedFull['Abbrev Truth'] = dfCombinedFull[targetRoutingGroup].map(solverAbbrevDict).fillna(dfCombinedFull[targetRoutingGroup])
-dfCombinedFull['Abbrev Pred'] = dfCombinedFull['Predicted Target'].map(solverAbbrevDict).fillna(dfCombinedFull['Predicted Target'])
+# Ensure abbreviation mappings exist for the test set explicitly
+dfTestEngineered['Abbrev Truth'] = dfTestEngineered[targetRoutingGroup].map(solverAbbrevDict).fillna(dfTestEngineered[targetRoutingGroup])
+dfTestEngineered['Abbrev Pred'] = dfTestEngineered['Predicted Target'].map(solverAbbrevDict).fillna(dfTestEngineered['Predicted Target'])
 
+# Generate both confusion matrices
 cmComb = confusion_matrix(dfCombinedFull['Abbrev Truth'], dfCombinedFull['Abbrev Pred'], labels=list(solverAbbrevDict.values()))
+cmTest = confusion_matrix(dfTestEngineered['Abbrev Truth'], dfTestEngineered['Abbrev Pred'], labels=list(solverAbbrevDict.values()))
+
 cmDfComb = pd.DataFrame(cmComb, index=list(solverAbbrevDict.values()), columns=list(solverAbbrevDict.values()))
+cmDfTest = pd.DataFrame(cmTest, index=list(solverAbbrevDict.values()), columns=list(solverAbbrevDict.values()))
 
 # Clean up empty rows/columns for display
-cmDfComb = cmDfComb.loc[(cmDfComb.sum(axis=1) != 0) | (cmDfComb.sum(axis=0) != 0), (cmDfComb.sum(axis=1) != 0) | (cmDfComb.sum(axis=0) != 0)]
+activeMask = (cmDfComb.sum(axis=1) != 0) | (cmDfComb.sum(axis=0) != 0)
+cmDfComb = cmDfComb.loc[activeMask, activeMask]
+cmDfTest = cmDfTest.loc[activeMask, activeMask]
+
 cmNormComb = cmDfComb.div(cmDfComb.sum(axis=1), axis=0).fillna(0) * 100
 
-sns.heatmap(cmNormComb, annot=cmDfComb, fmt="d", cmap='Blues', cbar_kws={'label': 'Accuracy (%)'}, annot_kws={"size": 11, "weight": "bold"}, ax=axesVal[1, 1])
+# Build custom text annotations: "Total \n [Test]"
+custom_annotations = np.empty_like(cmDfComb.values, dtype=object)
+for i in range(cmDfComb.shape[0]):
+    for j in range(cmDfComb.shape[1]):
+        valComb = cmDfComb.iloc[i, j]
+        valTest = cmDfTest.iloc[i, j]
+        if valComb == 0:
+            custom_annotations[i, j] = ""
+        else:
+            custom_annotations[i, j] = f"{valComb}"
+
+sns.heatmap(cmNormComb, annot=custom_annotations, fmt="", cmap='Blues', 
+            cbar_kws={'label': 'Accuracy (%)'}, annot_kws={"size": 11, "weight": "bold"}, ax=axesVal[1, 1])
+
 axesVal[1, 1].set_ylabel('True Target Group', fontsize=12, fontweight='bold')
 axesVal[1, 1].set_xlabel('Predicted Target Group', fontsize=12, fontweight='bold')
-axesVal[1, 1].set_title('Agentic Router Confusion Matrix (Total Volume, Colored by %)', fontsize=14, fontweight='bold')
+axesVal[1, 1].set_title('Agentic Router Confusion Matrix\nTotal Volume [Test Set Volume]', fontsize=14, fontweight='bold')
 
 plt.tight_layout(rect=[0, 0.03, 1, 0.96])
 plt.show()
